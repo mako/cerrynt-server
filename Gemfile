@@ -43,8 +43,6 @@ gem "feedjira"
 # Pagination
 
 group :test do
-  gem "rspec-rails"
-  gem "factory_bot_rails"
   gem "faker"
 
   # Mock HTTP requests
@@ -55,6 +53,8 @@ group :test do
 end
 
 group :development, :test do
+  gem "rspec-rails"
+  gem "factory_bot_rails"
   # See https://guides.rubyonrails.org/debugging_rails_applications.html#debugging-with-the-debug-gem
   gem "debug", platforms: %i[ mri windows ], require: "debug/prelude"
 
