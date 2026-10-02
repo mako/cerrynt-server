@@ -33,10 +33,10 @@ Design notes:
 
 ## Phase R0 – Foundation
 
-- [ ] **R0.1** Upgrade to the latest stable Ruby and Rails; review framework defaults and config diffs.
+- [x] **R0.1** Upgrade to the latest stable Ruby and Rails; review framework defaults and config diffs.
 - [ ] **R0.2** Review the already generated (uncommitted) models and migrations against the target model above; fix discrepancies.
-- [ ] **R0.3** Confirm SQLite as the MVP database (no citext; normalize emails in the model). Avoid SQLite-specific features so a later PostgreSQL move stays possible.
-- [ ] **R0.4** Test framework chosen and configured (one of Minitest/RSpec, not both), factories or fixtures.
+- [x] **R0.3** Confirm SQLite as the MVP database (no citext; normalize emails in the model). Avoid SQLite-specific features so a later PostgreSQL move stays possible.
+- [x] **R0.4** Test framework chosen and configured (one of Minitest/RSpec, not both), factories or fixtures.
 - [ ] **R0.5** GitHub Actions: tests, RuboCop (`rubocop-rails-omakase` or equivalent), Brakeman, bundler-audit.
 - [ ] **R0.6** `AGENTS.md` with conventions; README skeleton.
 
