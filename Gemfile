@@ -39,10 +39,8 @@ gem "image_processing", "~> 1.2"
 gem "feedjira"
 
 # JSON serializer
-gem "alba"
 
 # Pagination
-gem "pagy"
 
 group :test do
   gem "rspec-rails"
