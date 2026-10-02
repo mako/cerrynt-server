@@ -35,7 +35,7 @@ Design notes:
 
 - [ ] **R0.1** Upgrade to the latest stable Ruby and Rails; review framework defaults and config diffs.
 - [ ] **R0.2** Review the already generated (uncommitted) models and migrations against the target model above; fix discrepancies.
-- [ ] **R0.3** PostgreSQL setup, `citext` extension, development via Docker Compose or local Postgres.
+- [ ] **R0.3** Confirm SQLite as the MVP database (no citext; normalize emails in the model). Avoid SQLite-specific features so a later PostgreSQL move stays possible.
 - [ ] **R0.4** Test framework chosen and configured (one of Minitest/RSpec, not both), factories or fixtures.
 - [ ] **R0.5** GitHub Actions: tests, RuboCop (`rubocop-rails-omakase` or equivalent), Brakeman, bundler-audit.
 - [ ] **R0.6** `AGENTS.md` with conventions; README skeleton.
@@ -90,7 +90,7 @@ Design notes:
 
 - [ ] **R6.1** Kamal 2 deploy to the EC2 instance; TLS via the built-in proxy; domain.
 - [ ] **R6.2** Production config: logging, error reporting, `force_ssl`, host authorization.
-- [ ] **R6.3** Database backups (`pg_dump` to S3), restore tested once.
+- [ ] **R6.3** Back up the SQLite databases (Litestream or scheduled sqlite3 .backup to S3), keep storage/ as a persistent Kamal volume, test a restore once.
 - [ ] **R6.4** Uptime check and basic alerting.
 - [ ] **R6.5** Abuse protection for a public instance: signup cap or invite code, Rack::Attack, per-user entry/feed limits.
 - [ ] **R6.6** Public **demo account** documented in the README.
