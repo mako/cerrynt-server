@@ -8,7 +8,7 @@ class CreateEntryStates < ActiveRecord::Migration[8.1]
 
       t.timestamps
     end
-    add_index :entry_states, [:user_id, :entry_id], unique: true
-    add_index :entry_states, [:user_id, :updated_at]
+    add_index :entry_states, [ :user_id, :entry_id ], unique: true
+    add_index :entry_states, [ :user_id, :updated_at ]
   end
 end
