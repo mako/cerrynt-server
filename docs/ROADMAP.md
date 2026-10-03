@@ -34,7 +34,7 @@ Design notes:
 ## Phase R0 – Foundation
 
 - [x] **R0.1** Upgrade to the latest stable Ruby and Rails; review framework defaults and config diffs.
-- [ ] **R0.2** Review the already generated (uncommitted) models and migrations against the target model above; fix discrepancies.
+- [x] **R0.2** Review the already generated (uncommitted) models and migrations against the target model above; fix discrepancies.
 - [x] **R0.3** Confirm SQLite as the MVP database (no citext; normalize emails in the model). Avoid SQLite-specific features so a later PostgreSQL move stays possible.
 - [x] **R0.4** Test framework chosen and configured (one of Minitest/RSpec, not both), factories or fixtures.
 - [ ] **R0.5** GitHub Actions: tests, RuboCop (`rubocop-rails-omakase` or equivalent), Brakeman, bundler-audit.
@@ -54,7 +54,7 @@ Design notes:
 
 ## Phase R2 – Feeds and subscriptions
 
-- [ ] **R2.1** `Feed` URL normalization (scheme, host case, trailing slash, fragments).
+- [ ] **R2.1** `Feed` URL normalization (scheme, host case, remove the trailing slash only for an empty root path, fragments).
 - [ ] **R2.2** `POST /api/v1/subscriptions` with `url`: validate, find-or-create feed, enforce plan limit (`feed_limit_reached`).
 - [ ] **R2.3** `GET /api/v1/subscriptions`, `DELETE /api/v1/subscriptions/:id`.
 - [ ] **R2.4** Safe fetcher service (see R3) used for the first fetch on subscribe; feed discovery from an HTML page URL is optional.
