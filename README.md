@@ -8,8 +8,6 @@ Backend API for an RSS/Atom reader - manages feed subscriptions and read status 
 - SQLite (Rails 8 default, [Litestream](https://litestream.io/)-compatible backups)
 - [Solid Queue](https://github.com/rails/solid_queue) - background jobs (feed fetching), no separate Redis needed
 - [Feedjira](https://github.com/feedjira/feedjira) - RSS/Atom parsing
-- [Alba](https://github.com/okuramasafumi/alba) - JSON serialization
-- [Pagy](https://github.com/ddnexus/pagy) - pagination
 - RSpec, FactoryBot, WebMock/VCR - testing
 
 ## Prerequisites
@@ -31,13 +29,11 @@ bin/rails db:setup       # creates the database, runs migrations
 
 ## Seed data (creating a development user)
 
-The seed creates a user and prints out the corresponding API token, so you can test the endpoints.
+The seed creates a user so you can test the endpoints.
 
 ```bash
 SEED_USER_EMAIL="you@example.com" SEED_USER_PASSWORD="some-password" bin/rails db:seed
 ```
-
-The output includes the `api_token`, which you need to send in the `Authorization: Bearer <token>` header on subsequent requests.
 
 > Without env vars, it falls back to a default `you@example.com` email and a randomly generated password - and only runs in the `development` environment.
 
@@ -48,39 +44,6 @@ bin/rails server
 ```
 
 Runs on `http://localhost:3000` by default.
-
-## API endpoints
-
-Every endpoint (except `/api/v1/login`) requires an `Authorization: Bearer <token>` header.
-
-| Method | Path | Description |
-|---|---|---|
-| POST | `/api/v1/login` | Log in with email + password → returns `api_token` |
-| GET | `/api/v1/me` | Current user's details |
-| GET | `/api/v1/feeds` | List the current user's feeds |
-| POST | `/api/v1/feeds` | Add a new feed (`url`) |
-| DELETE | `/api/v1/feeds/:id` | Delete a feed |
-| GET | `/api/v1/items` | List items (paginated, filterable by `feed_id` / `unread`) |
-| PATCH | `/api/v1/items/:id` | Mark an item as read/unread |
-
-### Example: logging in
-
-```bash
-curl -X POST http://localhost:3000/api/v1/login \
-  -H "Content-Type: application/json" \
-  -d '{"session": {"email": "you@example.com", "password": "some-password"}}'
-```
-
-### Example: listing feeds
-
-```bash
-curl http://localhost:3000/api/v1/feeds \
-  -H "Authorization: Bearer <api_token>"
-```
-
-## Background job: feed fetching
-
-`FeedFetchJob` (Solid Queue) periodically polls registered feeds and creates new items. The schedule is defined in `config/recurring.yml`.
 
 ## Testing
 

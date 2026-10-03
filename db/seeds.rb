@@ -8,5 +8,4 @@ if Rails.env.development?
 
   puts "Seed user ready:"
   puts "  email:     #{user.email}"
-  puts "  api_token: #{user.api_token}"
 end
