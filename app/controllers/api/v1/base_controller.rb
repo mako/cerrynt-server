@@ -28,6 +28,17 @@ module Api
         }, status: :bad_request
       end
 
+      def render_rate_limited(retry_after)
+        response.headers["Retry-After"] = retry_after.to_i.to_s
+        render json: {
+          error: {
+            code: "rate_limited",
+            message: "Too many requests. Please try again later.",
+            details: {}
+          }
+        }, status: :too_many_requests
+      end
+
       def render_validation_error(record, rename: {})
         details = record.errors.as_json.stringify_keys
         rename.each do |from, to|

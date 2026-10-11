@@ -48,7 +48,7 @@ Design notes:
 - [x] **R1.2** `POST /api/v1/sessions` returns an opaque token per device.
 - [x] **R1.3** Token authentication via `Authorization: Bearer`, `last_used_at` updated (throttled); `DELETE /api/v1/session` revokes it.
 - [x] **R1.4** `GET /api/v1/me` returns user, plan and limits.
-- [ ] **R1.5** Rate limiting on registration and login (Rails `rate_limit` and/or Rack::Attack).
+- [x] **R1.5** Rate limiting on registration and login (Rails `rate_limit` and/or Rack::Attack).
 
 **Done when:** request specs cover happy paths, wrong password, revoked token, rate limit.
 
@@ -92,8 +92,9 @@ Design notes:
 - [ ] **R6.2** Production config: logging, error reporting, `force_ssl`, host authorization.
 - [ ] **R6.3** Back up the SQLite databases (Litestream or scheduled sqlite3 .backup to S3), keep storage/ as a persistent Kamal volume, test a restore once.
 - [ ] **R6.4** Uptime check and basic alerting.
-- [ ] **R6.5** Abuse protection for a public instance: signup cap or invite code, Rack::Attack, per-user entry/feed limits.
+- [ ] **R6.5** Abuse protection for a public instance: signup cap or invite code, Rack::Attack, per-user entry/feed limits, per-user cap on active API tokens.
 - [ ] **R6.6** Public **demo account** documented in the README.
+- [ ] **R6.7** Verify that request.remote_ip is the real client IP behind the production proxy (Kamal proxy/Thruster) and that X-Forwarded-For cannot be spoofed; rate limits depend on it. Smoke-test the rate limits against the deployed instance with the production cache store (e.g. 11 registrations from one IP return 429).
 
 ## Phase R7 – Polish
 
