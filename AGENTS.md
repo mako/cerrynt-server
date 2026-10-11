@@ -12,6 +12,7 @@ Cerrynt Server is the Rails backend and authoritative source of truth for Cerryn
 - **File safety:** Ask before deleting any file, even newly created ones. Never place helper or scratch files in the repo (use `/tmp`).
 - **Generators:** Do not run interactive generators with automatic confirmations (`yes y | ...`).
 - **Dependencies:** Do not add a gem or dependency without asking first and providing a one-line rationale.
+- **Ruby version:** Before starting a task, run `ruby -v` and confirm it matches `.ruby-version`; if it does not, stop and tell the user. Quote the Ruby version next to the results of the Definition of Done commands.
 - **Scope & decisions:** Do not expand scope beyond `docs/ROADMAP.md`. If a decision is ambiguous, ask instead of guessing.
 - **Roadmap tracking:** Tick the completed task in `docs/ROADMAP.md` only when the task passes all requirements.
 
