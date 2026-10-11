@@ -11,5 +11,10 @@ class User < ApplicationRecord
   validates :email, presence: true,
                     uniqueness: { case_sensitive: false },
                     format: { with: URI::MailTo::EMAIL_REGEXP }
+  validates :password, length: { minimum: 10 }, allow_nil: true
   validates :plan, inclusion: { in: %w[free pro] }
+
+  def to_api_h
+    UserPresenter.new(self).as_json
+  end
 end
