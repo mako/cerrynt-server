@@ -4,9 +4,9 @@ RSpec.describe "Token Authentication", type: :request do
   include ActiveSupport::Testing::TimeHelpers
 
   let(:user) { create(:user, password: "securepassword123") }
-  let(:session) { ApiToken.issue!(user: user, name: "laptop-cli") }
-  let(:token_record) { session[0] }
-  let(:raw_token) { session[1] }
+  let(:token_pair) { ApiToken.issue!(user: user, name: "laptop-cli") }
+  let(:token_record) { token_pair[0] }
+  let(:raw_token) { token_pair[1] }
 
   describe "unauthorized cases" do
     it "returns identical 401 response with WWW-Authenticate header across all failure modes" do
@@ -57,24 +57,22 @@ RSpec.describe "Token Authentication", type: :request do
         expect(token_record.last_used_at).to be_nil
 
         # First use sets last_used_at
-        delete "/api/v1/session", headers: { "Authorization" => "Bearer #{raw_token}" }
+        get "/api/v1/me", headers: { "Authorization" => "Bearer #{raw_token}" }
+        expect(response).to have_http_status(:ok)
         expect(token_record.reload.last_used_at).to eq(Time.current)
 
         initial_time = Time.current
 
-        # Re-activate token for testing subsequent calls
-        token_record.update_columns(revoked_at: nil)
-
         # Second use within the hour does not update last_used_at
         travel 30.minutes
-        delete "/api/v1/session", headers: { "Authorization" => "Bearer #{raw_token}" }
+        get "/api/v1/me", headers: { "Authorization" => "Bearer #{raw_token}" }
+        expect(response).to have_http_status(:ok)
         expect(token_record.reload.last_used_at).to eq(initial_time)
 
-        token_record.update_columns(revoked_at: nil)
-
-        # Third use after 2 hours updates last_used_at
+        # Third use after more than an hour updates last_used_at
         travel 90.minutes # now 2 hours after initial_time
-        delete "/api/v1/session", headers: { "Authorization" => "Bearer #{raw_token}" }
+        get "/api/v1/me", headers: { "Authorization" => "Bearer #{raw_token}" }
+        expect(response).to have_http_status(:ok)
         expect(token_record.reload.last_used_at).to eq(Time.current)
       end
     end

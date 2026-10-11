@@ -47,7 +47,7 @@ Design notes:
 - [x] **R1.1** `POST /api/v1/registrations` (email + password, validations).
 - [x] **R1.2** `POST /api/v1/sessions` returns an opaque token per device.
 - [x] **R1.3** Token authentication via `Authorization: Bearer`, `last_used_at` updated (throttled); `DELETE /api/v1/session` revokes it.
-- [ ] **R1.4** `GET /api/v1/me` returns user, plan and limits.
+- [x] **R1.4** `GET /api/v1/me` returns user, plan and limits.
 - [ ] **R1.5** Rate limiting on registration and login (Rails `rate_limit` and/or Rack::Attack).
 
 **Done when:** request specs cover happy paths, wrong password, revoked token, rate limit.
