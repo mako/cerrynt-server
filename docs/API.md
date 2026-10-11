@@ -17,6 +17,7 @@ Base path: `/api/v1`. JSON in, JSON out. This document is the contract between `
 | HTTP | `code` | Meaning |
 |---|---|---|
 | 401 | `unauthorized` | missing/invalid/revoked token |
+| 401 | `invalid_credentials` | wrong email or password |
 | 403 | `feed_limit_reached` | plan limit exceeded; `details` has `limit` and `plan` |
 | 404 | `not_found` | resource missing or not yours |
 | 422 | `validation_failed` | `details` holds field errors |
@@ -33,6 +34,7 @@ Base path: `/api/v1`. JSON in, JSON out. This document is the contract between `
 `201` → `{ "user": User }`
 
 ### `POST /sessions`
+`device_name` is required (max 100 characters).
 ```json
 { "email": "a@example.com", "password": "...", "device_name": "laptop-cli" }
 ```
