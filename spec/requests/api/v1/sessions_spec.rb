@@ -146,4 +146,32 @@ RSpec.describe "POST /api/v1/sessions", type: :request do
       expect(json["error"]["details"]["device_name"]).to include("is too long (maximum is 100 characters)")
     end
   end
+
+  describe "DELETE /api/v1/session" do
+    let(:session1) { ApiToken.issue!(user: user, name: "device-1") }
+    let(:token_record1) { session1[0] }
+    let(:raw_token1) { session1[1] }
+
+    let(:session2) { ApiToken.issue!(user: user, name: "device-2") }
+    let(:token_record2) { session2[0] }
+    let(:raw_token2) { session2[1] }
+
+    it "revokes the current token and returns 204" do
+      delete "/api/v1/session", headers: { "Authorization" => "Bearer #{raw_token1}" }
+
+      expect(response).to have_http_status(:no_content)
+      expect(response.body).to be_empty
+      expect(token_record1.reload.revoked_at).to be_present
+
+      # Subsequent request with the same token gets 401
+      delete "/api/v1/session", headers: { "Authorization" => "Bearer #{raw_token1}" }
+      expect(response).to have_http_status(:unauthorized)
+      expect(response.headers["WWW-Authenticate"]).to eq("Bearer")
+
+      # Other token of the same user still works
+      delete "/api/v1/session", headers: { "Authorization" => "Bearer #{raw_token2}" }
+      expect(response).to have_http_status(:no_content)
+      expect(token_record2.reload.revoked_at).to be_present
+    end
+  end
 end

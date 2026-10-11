@@ -71,4 +71,42 @@ RSpec.describe ApiToken, type: :model do
       }.to raise_error(ActiveRecord::RecordInvalid)
     end
   end
+
+  describe ".active scope" do
+    let(:user) { create(:user) }
+
+    it "includes non-revoked tokens and excludes revoked tokens" do
+      active_token = create(:api_token, user: user, revoked_at: nil)
+      revoked_token = create(:api_token, user: user, revoked_at: 1.day.ago)
+
+      expect(described_class.active).to include(active_token)
+      expect(described_class.active).not_to include(revoked_token)
+    end
+  end
+
+  describe "#touch_last_used_at!" do
+    include ActiveSupport::Testing::TimeHelpers
+
+    let(:token) { create(:api_token) }
+
+    it "sets last_used_at when nil" do
+      freeze_time do
+        expect { token.touch_last_used_at! }.to change { token.reload.last_used_at }.from(nil).to(Time.current)
+      end
+    end
+
+    it "does not update last_used_at when within 1 hour" do
+      token.update_columns(last_used_at: 30.minutes.ago)
+
+      expect { token.touch_last_used_at! }.not_to(change { token.reload.last_used_at })
+    end
+
+    it "updates last_used_at when older than 1 hour" do
+      token.update_columns(last_used_at: 2.hours.ago)
+
+      freeze_time do
+        expect { token.touch_last_used_at! }.to change { token.reload.last_used_at }.to(Time.current)
+      end
+    end
+  end
 end

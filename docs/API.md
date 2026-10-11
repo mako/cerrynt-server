@@ -16,6 +16,7 @@ Base path: `/api/v1`. JSON in, JSON out. This document is the contract between `
 
 | HTTP | `code` | Meaning |
 |---|---|---|
+| 400 | `bad_request` | malformed request or body |
 | 401 | `unauthorized` | missing/invalid/revoked token |
 | 401 | `invalid_credentials` | wrong email or password |
 | 403 | `feed_limit_reached` | plan limit exceeded; `details` has `limit` and `plan` |

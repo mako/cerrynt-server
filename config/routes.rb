@@ -3,6 +3,9 @@ Rails.application.routes.draw do
     namespace :v1 do
       resources :registrations, only: :create
       resources :sessions, only: :create
+      resource :session, only: :destroy
+
+      match "*unmatched", to: "errors#not_found", via: :all
     end
   end
 

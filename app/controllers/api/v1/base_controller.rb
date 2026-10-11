@@ -1,7 +1,32 @@
 module Api
   module V1
     class BaseController < ActionController::API
+      include Authenticatable
+
+      rescue_from ActiveRecord::RecordNotFound, with: :render_not_found
+      rescue_from ActionDispatch::Http::Parameters::ParseError, ActionController::ParameterMissing, with: :render_bad_request
+
       private
+
+      def render_not_found
+        render json: {
+          error: {
+            code: "not_found",
+            message: "Resource not found",
+            details: {}
+          }
+        }, status: :not_found
+      end
+
+      def render_bad_request
+        render json: {
+          error: {
+            code: "bad_request",
+            message: "Bad request",
+            details: {}
+          }
+        }, status: :bad_request
+      end
 
       def render_validation_error(record, rename: {})
         details = record.errors.as_json.stringify_keys
