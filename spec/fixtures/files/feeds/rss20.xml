@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:content="http://purl.org/rss/1.0/modules/content/">
+  <channel>
+    <title>Cerrynt RSS Feed</title>
+    <link>https://example.com/rss</link>
+    <description>An RSS 2.0 test feed for Cerrynt</description>
+    <item>
+      <title>First RSS Item</title>
+      <link>https://example.com/items/1</link>
+      <guid>item-1-guid</guid>
+      <author>author@example.com (Alice)</author>
+      <description>Summary of first item</description>
+      <content:encoded><![CDATA[<p>Full content of first item</p>]]></content:encoded>
+      <pubDate>Mon, 01 Jan 2024 12:00:00 GMT</pubDate>
+    </item>
+    <item>
+      <title>Second RSS Item</title>
+      <link>https://example.com/items/2</link>
+      <guid>item-2-guid</guid>
+      <author>author@example.com (Bob)</author>
+      <description>Summary of second item</description>
+      <pubDate>Tue, 02 Jan 2024 12:00:00 GMT</pubDate>
+    </item>
+  </channel>
+</rss>

@@ -61,8 +61,8 @@ Design notes:
 
 ## Phase R3 – Fetching
 
-- [ ] **R3.1** Fetcher: `Net::HTTP`/Faraday with timeouts, max body size, redirect limit, `User-Agent`.
-- [ ] **R3.2** **SSRF protection:** resolve the host and reject loopback, private, link-local (including `169.254.169.254`) and other reserved ranges; re-check after redirects; only `http`/`https`.
+- [x] **R3.1** Fetcher: `Net::HTTP`/Faraday with timeouts, max body size, redirect limit, `User-Agent`.
+- [x] **R3.2** **SSRF protection:** resolve the host and reject loopback, private, link-local (including `169.254.169.254`) and other reserved ranges; re-check after redirects; only `http`/`https`.
 - [ ] **R3.3** Parse with `feedjira` (or similar); upsert entries by `[feed_id, guid]`; fall back to URL/hash when `guid` is missing.
 - [ ] **R3.4** Conditional GET (`ETag`, `Last-Modified`), `next_fetch_at` scheduling, exponential backoff on failures, feed `status` (`active`/`failing`/`dead`).
 - [ ] **R3.5** Solid Queue recurring job that fetches due feeds in small batches.
@@ -76,7 +76,7 @@ Design notes:
 - [ ] **R4.2** `GET /api/v1/entries/:id` (full content).
 - [ ] **R4.3** `PATCH /api/v1/entries/:id/state` (read/starred), idempotent; `POST /api/v1/entries/mark_read`.
 - [ ] **R4.4** `GET /api/v1/sync?since=` returns subscriptions, new/changed entries and changed states since the cursor.
-- [ ] **R4.5** OPML import and export.
+- [ ] **R4.5** OPML import and export. Parse OPML with safe Nokogiri options (no entity substitution, no network, reject DTD declarations); same XXE rule as the feed fetcher.
 - [ ] **R4.6** Unread counts per subscription (cheap query, no N+1).
 
 ## Phase R5 – Plans and limits
