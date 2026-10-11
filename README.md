@@ -1,62 +1,83 @@
-# Cerrynt API
+# Cerrynt Server
 
-Backend API for an RSS/Atom reader - manages feed subscriptions and read status via a JSON API. [`cerrynt-cli`](https://github.com/mako/cerrynt-cli) (a Go TUI client) consumes this API.
+Rails backend and source of truth for Cerrynt, a multi-client RSS reader. Clients interact with it through a versioned JSON API.
 
-## Tech stack
+## Status
 
-- Ruby 3.4.10, Rails 8 (API-only mode)
-- SQLite (Rails 8 default, [Litestream](https://litestream.io/)-compatible backups)
-- [Solid Queue](https://github.com/rails/solid_queue) - background jobs (feed fetching), no separate Redis needed
-- [Feedjira](https://github.com/feedjira/feedjira) - RSS/Atom parsing
-- RSpec, FactoryBot, WebMock/VCR - testing
+Cerrynt Server is in early foundation development. The core data model, migrations, test suite, and CI pipeline are set up, but the API endpoints are not yet implemented. Development follows the task plan in [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
-## Prerequisites
+## Tech Stack
 
-- [mise](https://mise.jdx.dev/) for Ruby version management
+The application currently uses:
+- **Ruby:** 4.0.7 (pinned in `.ruby-version`)
+- **Framework:** Rails 8.1 (API-only mode)
+- **Database:** SQLite with Active Record
+- **Web Server:** Puma
+- **Authentication Support:** bcrypt (`has_secure_password`)
+- **Solid Suite:** Solid Cache, Solid Queue, Solid Cable
+- **Testing:** RSpec Rails, FactoryBot
+- **Code Quality & Security:** RuboCop (`rubocop-rails-omakase`), Brakeman, bundler-audit
 
-```bash
-mise install
-```
+## Getting Started
 
-(The Ruby version is pinned in `.mise.toml`.)
+### Prerequisites
 
-## Setup
+- Ruby 4.0.7 (see `.ruby-version`)
+- Bundler
 
-```bash
-bundle install
-bin/rails db:setup       # creates the database, runs migrations
-```
+### Setup
 
-## Seed data (creating a development user)
-
-The seed creates a user so you can test the endpoints.
+Clone the repository and run the setup script:
 
 ```bash
-SEED_USER_EMAIL="you@example.com" SEED_USER_PASSWORD="some-password" bin/rails db:seed
+bin/setup --skip-server
 ```
 
-> Without env vars, it falls back to a default `you@example.com` email and a randomly generated password - and only runs in the `development` environment.
+This installs dependencies, prepares the SQLite database, and clears temporary files.
 
-## Starting the server
+To seed a development user:
+
+```bash
+bin/rails db:seed
+```
+
+### Starting the Server
 
 ```bash
 bin/rails server
 ```
 
-Runs on `http://localhost:3000` by default.
+The server boots on `http://localhost:3000` by default. A health check is available at `http://localhost:3000/up`.
 
-## Testing
+## Running Tests and Checks
 
-```bash
-bin/rspec
-```
+- **Run test suite:**
+  ```bash
+  bin/rails db:test:prepare && bundle exec rspec
+  ```
+- **Lint code:**
+  ```bash
+  bin/rubocop
+  ```
+- **Security scan:**
+  ```bash
+  bin/brakeman --no-pager
+  bin/bundler-audit
+  ```
+- **Run full local CI pipeline:**
+  ```bash
+  bin/ci
+  ```
 
-The feed-fetching specs use VCR cassettes and don't make live network calls.
+## Documentation
 
-## Status
+- [`docs/ROADMAP.md`](docs/ROADMAP.md) — Implementation phases, target data model, scope, and progress.
+- [`docs/API.md`](docs/API.md) — The API contract for clients.
 
-Under active development - v1 goal: a single-user API built for personal use, serving the `cerrynt-cli` Go client. No public sign-up yet.
+## Related Projects
+
+- [`cerrynt-cli`](https://github.com/mako/cerrynt-cli) — Terminal UI (TUI) client written in Go.
 
 ## License
 
-TBD
+TODO: license to be decided
