@@ -10,4 +10,8 @@ class Plan
   def self.limits_for(plan_name)
     PLANS.fetch(plan_name, PLANS[FREE])
   end
+
+  def self.max_feeds_for(plan_name)
+    limits_for(plan_name)[:max_feeds]
+  end
 end

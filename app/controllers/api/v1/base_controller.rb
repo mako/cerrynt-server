@@ -8,6 +8,16 @@ module Api
 
       private
 
+      def render_error(code:, message:, status:, details: {})
+        render json: {
+          error: {
+            code: code.to_s,
+            message: message,
+            details: details
+          }
+        }, status: status
+      end
+
       def render_not_found
         render json: {
           error: {
