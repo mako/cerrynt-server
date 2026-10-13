@@ -22,8 +22,8 @@ Base path: `/api/v1`. JSON in, JSON out. This document is the contract between `
 | 403 | `feed_limit_reached` | plan limit exceeded; `details` has `limit` and `plan` |
 | 404 | `not_found` | resource missing or not yours |
 | 422 | `validation_failed` | `details` holds field errors |
-| 422 | `invalid_feed_url` | not http/https, blocked address, or not a feed |
-| 422 | `feed_unreachable` | could not fetch the feed |
+| 422 | `invalid_feed_url` | malformed, not http/https, too long, or the response is not a feed |
+| 422 | `feed_unreachable` | could not fetch the feed (this includes hosts that are not allowed) |
 | 429 | `rate_limited` | `Retry-After` header set |
 
 ## Auth
