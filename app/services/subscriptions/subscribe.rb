@@ -16,6 +16,8 @@ module Subscriptions
       end
     end
 
+    INTERACTIVE_DEADLINE = 5
+
     def self.call(user:, url:, fetcher: Feeds::Fetcher.method(:call))
       new(user: user, url: url, fetcher: fetcher).call
     end
@@ -51,8 +53,18 @@ module Subscriptions
       # 3. If the feed does not exist: check plan limit first (cheap rejection with NO fetch)
       return limit_reached_failure if feed_limit_reached?
 
-      # Fetch with injected fetcher OUTSIDE any transaction
-      fetch_result = @fetcher.call(normalized_url)
+      # Concurrency gate for interactive fetch: bounds synchronous fetches so a Puma thread
+      # is always kept free for health checks and auth. Background jobs (R3.5) must NOT use this gate.
+      fetch_result = Feeds::FetchGate.try_run do
+        @fetcher.call(normalized_url, deadline: INTERACTIVE_DEADLINE)
+      end
+
+      if fetch_result == :busy
+        return failure(
+          error: :busy,
+          message: "Too many feed fetches in progress"
+        )
+      end
 
       # 4. On a fetch failure: respond immediately and write nothing
       unless fetch_result.ok?

@@ -929,4 +929,37 @@ RSpec.describe Feeds::Fetcher do
       expect(result.error).to eq(:not_a_feed)
     end
   end
+
+  describe "deadline: option" do
+    it "returns :timeout when short deadline is exceeded by a slow resolver" do
+      slow_resolver = lambda { |_host|
+        sleep 0.1
+        [ public_ip ]
+      }
+
+      result = described_class.call("http://example.com/rss.xml", resolver: slow_resolver, deadline: 0.02)
+      expect(result.ok?).to be false
+      expect(result.error).to eq(:timeout)
+    end
+
+    it "caps a larger deadline at TOTAL_DEADLINE" do
+      stub_const("Feeds::Fetcher::TOTAL_DEADLINE", 0.02)
+      slow_resolver = lambda { |_host|
+        sleep 0.1
+        [ public_ip ]
+      }
+
+      result = described_class.call("http://example.com/rss.xml", resolver: slow_resolver, deadline: 999)
+      expect(result.ok?).to be false
+      expect(result.error).to eq(:timeout)
+    end
+
+    it "raises ArgumentError when deadline is non-numeric, zero, negative, or nil" do
+      [ 0, -1, -0.5, nil, "5", :ten, [] ].each do |invalid_deadline|
+        expect {
+          described_class.call("http://example.com/rss.xml", resolver: fake_resolver, deadline: invalid_deadline)
+        }.to raise_error(ArgumentError, /deadline must be a positive Numeric/)
+      end
+    end
+  end
 end

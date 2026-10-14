@@ -84,8 +84,8 @@ module Feeds
       end
     }
 
-    def self.call(url, resolver: DEFAULT_RESOLVER)
-      new(url, resolver: resolver).call
+    def self.call(url, resolver: DEFAULT_RESOLVER, deadline: TOTAL_DEADLINE)
+      new(url, resolver: resolver, deadline: deadline).call
     end
 
     def self.blocked_address?(ip_or_str)
@@ -160,18 +160,23 @@ module Feeds
       end
     end
 
-    def initialize(url, resolver: DEFAULT_RESOLVER)
+    def initialize(url, resolver: DEFAULT_RESOLVER, deadline: TOTAL_DEADLINE)
+      unless deadline.is_a?(Numeric) && deadline.positive?
+        raise ArgumentError, "deadline must be a positive Numeric, got: #{deadline.inspect}"
+      end
+
       @initial_url = url
       @resolver = resolver
+      @deadline = [ deadline, TOTAL_DEADLINE ].min
     end
 
     def call
-      deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + TOTAL_DEADLINE
+      deadline_end = Process.clock_gettime(Process::CLOCK_MONOTONIC) + @deadline
       current_url = @initial_url
       redirect_count = 0
 
       loop do
-        remaining_time = deadline - Process.clock_gettime(Process::CLOCK_MONOTONIC)
+        remaining_time = deadline_end - Process.clock_gettime(Process::CLOCK_MONOTONIC)
         return failure(:timeout, final_url: current_url) if remaining_time <= 0
 
         uri = validate_url(current_url)
@@ -187,7 +192,7 @@ module Feeds
 
         chosen_ip = addresses.first.to_s
 
-        remaining_time = deadline - Process.clock_gettime(Process::CLOCK_MONOTONIC)
+        remaining_time = deadline_end - Process.clock_gettime(Process::CLOCK_MONOTONIC)
         return failure(:timeout, final_url: current_url) if remaining_time <= 0
 
         response, body = fetch_http(uri, chosen_ip, remaining_time)
