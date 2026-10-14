@@ -37,6 +37,8 @@ module Api
         elsif result.existing?
           render json: { subscription: SubscriptionPresenter.new(result.subscription).as_json },
                  status: :ok
+        elsif result.error == :busy
+          render_rate_limited(Feeds::FetchGate::RETRY_AFTER)
         else
           status = (result.error == :feed_limit_reached) ? :forbidden : :unprocessable_content
 

@@ -58,7 +58,7 @@ Design notes:
 - [x] **R2.2** `POST /api/v1/subscriptions` with `url`: validate, find-or-create feed, enforce plan limit (`feed_limit_reached`).
 - [x] **R2.3** `GET /api/v1/subscriptions`, `DELETE /api/v1/subscriptions/:id`.
 - [x] **R2.4** Safe fetcher service (see R3) used for the first fetch on subscribe; feed discovery from an HTML page URL is optional.
-- [ ] **R2.5** Before any public deployment: bound the synchronous subscribe fetch (shorter interactive deadline, process-wide cap on concurrent interactive fetches that always leaves a free Puma thread).
+- [x] **R2.5** Before any public deployment: bound the synchronous subscribe fetch (shorter interactive deadline, process-wide cap on concurrent interactive fetches that always leaves a free Puma thread).
 
 ## Phase R3 – Fetching
 
@@ -89,13 +89,13 @@ Design notes:
 
 ## Phase R6 – Production on EC2
 
-- [ ] **R6.1** Kamal 2 deploy to the EC2 instance; TLS via the built-in proxy; domain.
+- [ ] **R6.1** Kamal 2 deploy to the EC2 instance; TLS via the built-in proxy; domain. Set RAILS_MAX_THREADS explicitly in config/deploy.yml so Puma and Feeds::FetchGate agree.
 - [ ] **R6.2** Production config: logging, error reporting, `force_ssl`, host authorization.
 - [ ] **R6.3** Back up the SQLite databases (Litestream or scheduled sqlite3 .backup to S3), keep storage/ as a persistent Kamal volume, test a restore once.
 - [ ] **R6.4** Uptime check and basic alerting.
-- [ ] **R6.5** Abuse protection for a public instance: signup cap or invite code, Rack::Attack, per-user entry/feed limits, per-user cap on active API tokens. Subscribing fetches synchronously and holds a Puma thread for up to the fetch deadline: consider a shorter interactive deadline or moving the first fetch to a job; clean up feeds without subscriptions and orphaned entry_states.
+- [ ] **R6.5** Abuse protection for a public instance: signup cap or invite code, Rack::Attack, per-user entry/feed limits, per-user cap on active API tokens. Subscribing fetches synchronously and holds a Puma thread for up to the fetch deadline: consider a shorter interactive deadline or moving the first fetch to a job; clean up feeds without subscriptions and orphaned entry_states. Per-user limit of one in-flight interactive fetch, so one account cannot hold all fetch slots.
 - [ ] **R6.6** Public **demo account** documented in the README.
-- [ ] **R6.7** Verify that request.remote_ip is the real client IP behind the production proxy (Kamal proxy/Thruster) and that X-Forwarded-For cannot be spoofed; rate limits depend on it. Smoke-test the rate limits against the deployed instance with the production cache store (e.g. 11 registrations from one IP return 429).
+- [ ] **R6.7** Verify that request.remote_ip is the real client IP behind the production proxy (Kamal proxy/Thruster) and that X-Forwarded-For cannot be spoofed; rate limits depend on it. Smoke-test the rate limits against the deployed instance with the production cache store (e.g. 11 registrations from one IP return 429). Smoke-test the interactive subscribe limits against a deliberately slow test server (a response that never completes): subscribe returns within about 5 s, and with several parallel slow requests GET /up still answers.
 
 ## Phase R7 – Polish
 

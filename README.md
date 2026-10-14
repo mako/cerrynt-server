@@ -51,6 +51,8 @@ The server boots on `http://localhost:3000` by default. A health check is availa
 
 Rate limiting relies on Rails caching. In development, caching can be enabled via `bin/rails dev:cache` (which creates `tmp/caching-dev.txt` and switches `config.cache_store` from `:null_store` to `:memory_store`). Ensure caching is enabled to test rate limiting locally.
 
+Set `MAX_INTERACTIVE_FETCHES` to override the process-wide concurrency gate for synchronous feed subscriptions (defaults to `RAILS_MAX_THREADS - 1`, clamped to `1..(threads - 1)`).
+
 ## Running Tests and Checks
 
 - **Run test suite:**

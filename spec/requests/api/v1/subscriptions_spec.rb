@@ -123,7 +123,7 @@ RSpec.describe "Api::V1::Subscriptions", type: :request do
         baseline_transactions = ActiveRecord::Base.connection.open_transactions
         target_url = "https://example.com/no_tx_feed.xml"
 
-        allow(Feeds::Fetcher).to receive(:call).with(target_url) do
+        allow(Feeds::Fetcher).to receive(:call).with(target_url, deadline: 5) do
           expect(ActiveRecord::Base.connection.open_transactions).to eq(baseline_transactions)
           build_fetch_result(title: "No Tx Feed")
         end
@@ -249,7 +249,7 @@ RSpec.describe "Api::V1::Subscriptions", type: :request do
         create(:subscription, user: pro_user, feed: feed2)
 
         allow(Feeds::Fetcher).to receive(:call)
-          .with("https://example.com/pro3.xml")
+          .with("https://example.com/pro3.xml", deadline: 5)
           .and_return(build_fetch_result(title: "Feed 3"))
 
         expect {
@@ -333,13 +333,13 @@ RSpec.describe "Api::V1::Subscriptions", type: :request do
       end
 
       it "produces identical bodies for :blocked_address and :unreachable and leaks no IPs" do
-        allow(Feeds::Fetcher).to receive(:call).with("https://example.com/blocked.xml")
+        allow(Feeds::Fetcher).to receive(:call).with("https://example.com/blocked.xml", deadline: 5)
           .and_return(Feeds::Fetcher::Result.new(
             success: false, error: :blocked_address, message: "Blocked address: 10.0.0.1",
             status: nil, final_url: "https://example.com/blocked.xml", etag: nil, last_modified: nil, feed: nil
           ))
 
-        allow(Feeds::Fetcher).to receive(:call).with("https://example.com/unreachable.xml")
+        allow(Feeds::Fetcher).to receive(:call).with("https://example.com/unreachable.xml", deadline: 5)
           .and_return(Feeds::Fetcher::Result.new(
             success: false, error: :unreachable, message: "Host unreachable: 10.0.0.1",
             status: nil, final_url: "https://example.com/unreachable.xml", etag: nil, last_modified: nil, feed: nil
@@ -376,7 +376,7 @@ RSpec.describe "Api::V1::Subscriptions", type: :request do
 
         test_cases.each do |error_symbol, (expected_status, expected_code)|
           target_url = "https://example.com/err_#{error_symbol}.xml"
-          allow(Feeds::Fetcher).to receive(:call).with(target_url)
+          allow(Feeds::Fetcher).to receive(:call).with(target_url, deadline: 5)
             .and_return(Feeds::Fetcher::Result.new(
               success: false, error: error_symbol, message: "Internal detail with IP 192.168.1.1",
               status: 500, final_url: target_url, etag: nil, last_modified: nil, feed: nil
@@ -402,7 +402,7 @@ RSpec.describe "Api::V1::Subscriptions", type: :request do
         expect(user.subscriptions.count).to eq(1)
 
         target_url = "https://example.com/race1.xml"
-        allow(Feeds::Fetcher).to receive(:call).with(target_url) do
+        allow(Feeds::Fetcher).to receive(:call).with(target_url, deadline: 5) do
           concurrent_feed = create(:feed, url: "https://example.com/concurrent.xml")
           create(:subscription, user: user, feed: concurrent_feed)
 
@@ -423,7 +423,7 @@ RSpec.describe "Api::V1::Subscriptions", type: :request do
         target_url = "https://example.com/race2.xml"
         other_user = create(:user)
 
-        allow(Feeds::Fetcher).to receive(:call).with(target_url) do
+        allow(Feeds::Fetcher).to receive(:call).with(target_url, deadline: 5) do
           feed = create(:feed, url: target_url, title: "Concurrent Winner Feed")
           create(:subscription, user: other_user, feed: feed)
 
@@ -445,7 +445,7 @@ RSpec.describe "Api::V1::Subscriptions", type: :request do
         target_url = "https://example.com/idempotent.xml"
         concurrent_sub = nil
 
-        allow(Feeds::Fetcher).to receive(:call).with(target_url) do
+        allow(Feeds::Fetcher).to receive(:call).with(target_url, deadline: 5) do
           feed = create(:feed, url: target_url, title: "Idempotent Feed")
           concurrent_sub = create(:subscription, user: user, feed: feed)
           build_fetch_result(title: "Idempotent Feed")
@@ -457,6 +457,154 @@ RSpec.describe "Api::V1::Subscriptions", type: :request do
         expect(response.parsed_body.dig("subscription", "id")).to eq(concurrent_sub.id.to_s)
         expect(user.subscriptions.reload.count).to eq(2)
         expect(Feed.where(url: target_url).count).to eq(1)
+      end
+    end
+
+    describe "concurrency gate and interactive deadline" do
+      it "passes INTERACTIVE_DEADLINE (5s) to Feeds::Fetcher.call on subscribe" do
+        target_url = "https://example.com/deadline_check.xml"
+        expect(Feeds::Fetcher).to receive(:call)
+          .with(target_url, deadline: Subscriptions::Subscribe::INTERACTIVE_DEADLINE)
+          .and_return(build_fetch_result(title: "Deadline Feed"))
+
+        post "/api/v1/subscriptions", params: { url: target_url }, headers: headers, as: :json
+        expect(response).to have_http_status(:created)
+      end
+
+      it "returns 429 rate_limited with Retry-After 5 when gate is full for a new feed, never calls fetcher and writes nothing" do
+        with_env("RAILS_MAX_THREADS" => "3") do
+          capacity = Feeds::FetchGate.capacity
+          occupy_threads = []
+          started_queue = Queue.new
+          release_queue = Queue.new
+
+          begin
+            capacity.times do
+              occupy_threads << Thread.new do
+                Feeds::FetchGate.try_run do
+                  started_queue << true
+                  release_queue.pop
+                end
+              end
+            end
+
+            Timeout.timeout(5) do
+              capacity.times { started_queue.pop }
+            end
+
+            expect(Feeds::Fetcher).not_to receive(:call)
+
+            target_url = "https://example.com/new_busy.xml"
+            expect {
+              post "/api/v1/subscriptions", params: { url: target_url }, headers: headers, as: :json
+            }.to not_change(Feed, :count)
+             .and not_change(Subscription, :count)
+
+            expect(response).to have_http_status(:too_many_requests)
+            expect(response.headers["Retry-After"]).to eq("5")
+            expect(response.parsed_body).to eq({
+              "error" => {
+                "code" => "rate_limited",
+                "message" => "Too many requests. Please try again later.",
+                "details" => {}
+              }
+            })
+          ensure
+            capacity.times { release_queue << true }
+            occupy_threads.each { |t| t.join(1) }
+          end
+        end
+      end
+
+      it "subscribes or returns existing feed even when gate is full (gate not consulted)" do
+        existing_feed = create(:feed, url: "https://example.com/existing_gate.xml")
+        create(:subscription, user: user, feed: existing_feed)
+
+        other_user = create(:user)
+        shared_feed = create(:feed, url: "https://example.com/shared_gate.xml")
+        create(:subscription, user: other_user, feed: shared_feed)
+
+        fresh_user = create(:user, email: "fresh@example.com")
+        fresh_token = ApiToken.issue!(user: fresh_user, name: "fresh")[1]
+        fresh_headers = { "Authorization" => "Bearer #{fresh_token}" }
+
+        with_env("RAILS_MAX_THREADS" => "3") do
+          capacity = Feeds::FetchGate.capacity
+          occupy_threads = []
+          started = Queue.new
+          release = Queue.new
+
+          begin
+            capacity.times do
+              occupy_threads << Thread.new do
+                Feeds::FetchGate.try_run do
+                  started << true
+                  release.pop
+                end
+              end
+            end
+            Timeout.timeout(5) { capacity.times { started.pop } }
+
+            expect(Feeds::FetchGate).not_to receive(:try_run)
+            expect(Feeds::Fetcher).not_to receive(:call)
+
+            # 1. Subscribing to already subscribed feed -> 200 OK
+            post "/api/v1/subscriptions", params: { url: existing_feed.url }, headers: headers, as: :json
+            expect(response).to have_http_status(:ok)
+
+            # 2. Subscribing to existing DB feed from another user -> 201 Created
+            post "/api/v1/subscriptions", params: { url: shared_feed.url }, headers: fresh_headers, as: :json
+            expect(response).to have_http_status(:created)
+          ensure
+            capacity.times { release << true }
+            occupy_threads.each { |t| t.join(1) }
+          end
+        end
+      end
+
+      it "frees the gate slot after a failing fetch or when fetcher raises" do
+        with_env("RAILS_MAX_THREADS" => "3") do
+          capacity = Feeds::FetchGate.capacity
+          expect(capacity).to eq(2)
+
+          started = Queue.new
+          release = Queue.new
+          holder_thread = Thread.new do
+            Feeds::FetchGate.try_run do
+              started << true
+              release.pop
+            end
+          end
+
+          begin
+            Timeout.timeout(5) { started.pop }
+
+            # Failing request 1: fetcher returns failure Result (:timeout)
+            allow(Feeds::Fetcher).to receive(:call).with("https://example.com/fail1.xml", deadline: 5)
+              .and_return(build_fetch_result(success: false, error: :timeout))
+
+            post "/api/v1/subscriptions", params: { url: "https://example.com/fail1.xml" }, headers: headers, as: :json
+            expect(response).to have_http_status(:unprocessable_content)
+
+            # Failing request 2: fetcher raises an exception
+            allow(Feeds::Fetcher).to receive(:call).with("https://example.com/crash.xml", deadline: 5)
+              .and_raise(StandardError, "network blew up")
+
+            expect {
+              post "/api/v1/subscriptions", params: { url: "https://example.com/crash.xml" }, headers: headers, as: :json
+            }.to raise_error(StandardError, "network blew up")
+
+            # The slot must still be free for a subsequent request
+            allow(Feeds::Fetcher).to receive(:call).with("https://example.com/success.xml", deadline: 5)
+              .and_return(build_fetch_result(title: "Success Feed"))
+
+            post "/api/v1/subscriptions", params: { url: "https://example.com/success.xml" }, headers: headers, as: :json
+            expect(response).to have_http_status(:created)
+          ensure
+            release << true
+            holder_thread.join(1)
+          end
+        end
       end
     end
 

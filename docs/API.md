@@ -24,7 +24,7 @@ Base path: `/api/v1`. JSON in, JSON out. This document is the contract between `
 | 422 | `validation_failed` | `details` holds field errors |
 | 422 | `invalid_feed_url` | malformed, not http/https, too long, or the response is not a feed |
 | 422 | `feed_unreachable` | could not fetch the feed (this includes hosts that are not allowed) |
-| 429 | `rate_limited` | `Retry-After` header set |
+| 429 | `rate_limited` | too many requests, or too many feed fetches in progress; retry after `Retry-After` seconds |
 
 ## Auth
 
