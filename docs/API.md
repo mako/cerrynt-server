@@ -91,6 +91,8 @@ Query: `subscription_id`, `unread=true`, `starred=true`, `cursor`, `limit`. Orde
 ```
 `Entry` = `EntrySummary` + `"content": "<p>...</p>"`.
 
+`summary` and `content` are sanitized HTML (fixed tag allow-list, absolute http(s)/mailto links with rel=nofollow noopener noreferrer, no scripts, styles, forms or embeds); every other text field is plain text and must be escaped by clients.
+
 ### `PATCH /entries/:id/state`
 ```json
 { "read": true, "starred": false }

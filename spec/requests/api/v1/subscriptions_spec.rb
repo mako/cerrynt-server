@@ -606,6 +606,41 @@ RSpec.describe "Api::V1::Subscriptions", type: :request do
           end
         end
       end
+
+      it "never runs HTML sanitization inside a database transaction and passes the interactive budget" do
+        baseline_transactions = ActiveRecord::Base.connection.open_transactions
+        sanitizer_calls = 0
+
+        allow(Feeds::Refresh).to receive(:prepare)
+          .with(anything, budget: Subscriptions::Subscribe::INTERACTIVE_SANITIZE_BUDGET)
+          .and_call_original
+
+        allow(Feeds::ContentSanitizer).to receive(:call).and_wrap_original do |original, *args, **kwargs|
+          sanitizer_calls += 1
+          expect(ActiveRecord::Base.connection.open_transactions).to eq(baseline_transactions)
+          original.call(*args, **kwargs)
+        end
+
+        target_url = "https://example.com/no_tx_sanitize.xml"
+        entry = Feeds::Fetcher::ParsedEntry.new(
+          guid: "tx-1",
+          url: "https://example.com/posts/1",
+          title: "Post 1",
+          author: "Alice",
+          summary: "<p>Summary</p>",
+          content: "<p>Content</p>",
+          published_at: 1.day.ago
+        )
+        allow(Feeds::Fetcher).to receive(:call).with(target_url, deadline: 5)
+          .and_return(build_fetch_result(title: "No TX Feed", entries: [ entry ]))
+
+        post "/api/v1/subscriptions", params: { url: target_url }, headers: headers, as: :json
+
+        expect(response).to have_http_status(:created)
+        expect(sanitizer_calls).to be > 0
+        expect(Feeds::Refresh).to have_received(:prepare)
+          .with(anything, budget: Subscriptions::Subscribe::INTERACTIVE_SANITIZE_BUDGET)
+      end
     end
 
     describe "rate limiting" do
