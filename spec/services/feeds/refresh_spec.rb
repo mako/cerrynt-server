@@ -611,5 +611,175 @@ RSpec.describe Feeds::Refresh do
         expect(entry2.published_at).to eq(Time.utc(2024, 1, 2, 12, 0, 0))
       end
     end
+
+    describe "HTML content sanitization at ingest" do
+      let(:entry_with_html) do
+        build_entry(
+          guid: "entry-sanitize-1",
+          url: "https://example.com/posts/article.html",
+          title: "<script>alert('title')</script>Plain Title",
+          author: "<script>alert('author')</script>Plain Author",
+          summary: "<script>alert(1)</script><p>Summary with <a href=\"/relative/path\">link</a></p>",
+          content: "<div onclick=\"evil()\"><p>Content with <img src=\"../img.png\" alt=\"pic\"></p></div>"
+        )
+      end
+
+      it "stores sanitized summary and content, resolving relative URLs against entry url" do
+        fetch_result = build_fetch_result(entries: [ entry_with_html ])
+        result = described_class.call(feed, fetcher: ->(_url) { fetch_result })
+
+        expect(result).to be_ok
+        expect(result.created).to eq(1)
+
+        saved = feed.entries.find_by(guid: "entry-sanitize-1")
+        expect(saved.title).to eq("<script>alert('title')</script>Plain Title")
+        expect(saved.author).to eq("<script>alert('author')</script>Plain Author")
+        expect(saved.summary).to eq("alert(1)<p>Summary with <a href=\"https://example.com/relative/path\" rel=\"nofollow noopener noreferrer\">link</a></p>")
+        expect(saved.content).to eq("<div><p>Content with <img src=\"https://example.com/img.png\" alt=\"pic\"></p></div>")
+      end
+
+      it "reports updated 0 on an unchanged second refresh (idempotence in the real flow)" do
+        fetch_result = build_fetch_result(entries: [ entry_with_html ])
+        described_class.call(feed, fetcher: ->(_url) { fetch_result })
+
+        result2 = described_class.call(feed, fetcher: ->(_url) { fetch_result })
+        expect(result2.created).to eq(0)
+        expect(result2.updated).to eq(0)
+        expect(result2.skipped).to eq(0)
+      end
+
+      it "updates a pre-existing raw row exactly once to the sanitized value and stays stable afterwards" do
+        raw_entry = create(
+          :entry,
+          feed: feed,
+          guid: "entry-sanitize-1",
+          url: "https://example.com/posts/article.html",
+          title: "<script>alert('title')</script>Plain Title",
+          author: "<script>alert('author')</script>Plain Author",
+          summary: "<script>alert(1)</script><p>Summary with <a href=\"/relative/path\">link</a></p>",
+          content: "<div onclick=\"evil()\"><p>Content with <img src=\"../img.png\" alt=\"pic\"></p></div>"
+        )
+
+        fetch_result = build_fetch_result(entries: [ entry_with_html ])
+
+        # First refresh: updates raw row to sanitized value
+        result1 = described_class.call(feed, fetcher: ->(_url) { fetch_result })
+        expect(result1.created).to eq(0)
+        expect(result1.updated).to eq(1)
+
+        raw_entry.reload
+        expect(raw_entry.summary).to eq("alert(1)<p>Summary with <a href=\"https://example.com/relative/path\" rel=\"nofollow noopener noreferrer\">link</a></p>")
+        expect(raw_entry.content).to eq("<div><p>Content with <img src=\"https://example.com/img.png\" alt=\"pic\"></p></div>")
+        expect(raw_entry.title).to eq("<script>alert('title')</script>Plain Title")
+        expect(raw_entry.author).to eq("<script>alert('author')</script>Plain Author")
+        updated_at_after_first = raw_entry.updated_at
+
+        # Second refresh: content is already sanitized and identical, no update
+        result2 = described_class.call(feed, fetcher: ->(_url) { fetch_result })
+        expect(result2.created).to eq(0)
+        expect(result2.updated).to eq(0)
+
+        raw_entry.reload
+        expect(raw_entry.updated_at).to eq(updated_at_after_first)
+      end
+    end
+
+    describe "CPU sanitization budget and prepare/persist split" do
+      it "defers entries beyond the budget, preserves order by stopping at the first exceeding entry, and stores them on a later refresh" do
+        e1 = build_entry(guid: "b-1", summary: "<p>#{'a' * 40}</p>", content: "<p>#{'b' * 40}</p>") # ~94 chars
+        e2 = build_entry(guid: "b-2", summary: "<p>#{'c' * 40}</p>", content: "<p>#{'d' * 40}</p>") # ~94 chars
+        e3 = build_entry(guid: "b-3", summary: "<p>#{'e' * 40}</p>", content: "<p>#{'f' * 40}</p>") # ~94 chars (exceeds 200 budget)
+        e4 = build_entry(guid: "b-4", summary: "x", content: "y") # tiny, but comes after e3 so must also be deferred
+
+        fetch_result = build_fetch_result(entries: [ e1, e2, e3, e4 ])
+
+        prepared = described_class.prepare(fetch_result, budget: 200)
+        expect(prepared.entries.map(&:guid)).to eq([ "b-1", "b-2" ])
+        expect(prepared.deferred).to eq(2)
+        expect(prepared.skipped).to eq(0)
+
+        result1 = described_class.persist(feed, prepared)
+        expect(result1).to be_ok
+        expect(result1.created).to eq(2)
+        expect(result1.updated).to eq(0)
+        expect(result1.deferred).to eq(2)
+        expect(feed.entries.order(:id).pluck(:guid)).to eq([ "b-1", "b-2" ])
+
+        # Later refresh with enough budget stores the previously deferred entries
+        result2 = described_class.call(feed, fetcher: ->(_url) { fetch_result }, budget: 1_000)
+        expect(result2).to be_ok
+        expect(result2.created).to eq(2)
+        expect(result2.updated).to eq(0)
+        expect(result2.deferred).to eq(0)
+        expect(feed.entries.order(:id).pluck(:guid)).to eq([ "b-1", "b-2", "b-3", "b-4" ])
+      end
+
+      it "always processes the first entry even if it alone exceeds the budget" do
+        huge_first = build_entry(guid: "huge-1", summary: "<p>#{'a' * 500}</p>", content: "<p>#{'b' * 500}</p>")
+        second = build_entry(guid: "small-2", summary: "<p>hi</p>", content: "<p>there</p>")
+
+        fetch_result = build_fetch_result(entries: [ huge_first, second ])
+
+        result = described_class.call(feed, fetcher: ->(_url) { fetch_result }, budget: 50)
+        expect(result).to be_ok
+        expect(result.created).to eq(1)
+        expect(result.deferred).to eq(1)
+        expect(feed.entries.pluck(:guid)).to eq([ "huge-1" ])
+      end
+
+      it "stores etag and last_modified as nil when deferred > 0, and stores them when deferred is 0" do
+        feed.update!(etag: '"old-etag"', last_modified: "Mon, 01 Jan 2026 00:00:00 GMT")
+
+        e1 = build_entry(guid: "d-1", summary: "<p>#{'a' * 60}</p>", content: "<p>#{'b' * 60}</p>")
+        e2 = build_entry(guid: "d-2", summary: "<p>#{'c' * 60}</p>", content: "<p>#{'d' * 60}</p>")
+        fetch_result = build_fetch_result(
+          entries: [ e1, e2 ],
+          etag: '"new-etag"',
+          last_modified: "Wed, 15 Apr 2026 12:00:00 GMT"
+        )
+
+        # First refresh with tight budget -> deferred == 1 -> etag and last_modified must be nil
+        result1 = described_class.call(feed, fetcher: ->(_url) { fetch_result }, budget: 150)
+        expect(result1.deferred).to eq(1)
+        feed.reload
+        expect(feed.etag).to be_nil
+        expect(feed.last_modified).to be_nil
+
+        # Second refresh with full budget -> deferred == 0 -> etag and last_modified stored
+        result2 = described_class.call(feed, fetcher: ->(_url) { fetch_result }, budget: 1_000)
+        expect(result2.deferred).to eq(0)
+        feed.reload
+        expect(feed.etag).to eq('"new-etag"')
+        expect(feed.last_modified).to eq("Wed, 15 Apr 2026 12:00:00 GMT")
+      end
+
+      it "stores an entry with nil summary and content when ContentSanitizer raises, while storing sibling entries normally" do
+        e1 = build_entry(guid: "s-1", summary: "<p>good 1</p>", content: "<p>body 1</p>")
+        e2 = build_entry(guid: "s-2", summary: "<p>POISON</p>", content: "<p>POISON</p>")
+        e3 = build_entry(guid: "s-3", summary: "<p>good 3</p>", content: "<p>body 3</p>")
+
+        allow(Nokogiri::HTML5).to receive(:fragment).and_wrap_original do |original, *args, **kwargs|
+          raise StandardError, "boom" if args.first.to_s.include?("POISON")
+
+          original.call(*args, **kwargs)
+        end
+        allow(Rails.logger).to receive(:warn)
+
+        fetch_result = build_fetch_result(entries: [ e1, e2, e3 ])
+        result = described_class.call(feed, fetcher: ->(_url) { fetch_result })
+
+        expect(result).to be_ok
+        expect(result.created).to eq(3)
+
+        entries_by_guid = feed.entries.index_by(&:guid)
+        expect(entries_by_guid["s-1"].summary).to eq("<p>good 1</p>")
+        expect(entries_by_guid["s-1"].content).to eq("<p>body 1</p>")
+        expect(entries_by_guid["s-2"].summary).to be_nil
+        expect(entries_by_guid["s-2"].content).to be_nil
+        expect(entries_by_guid["s-3"].summary).to eq("<p>good 3</p>")
+        expect(entries_by_guid["s-3"].content).to eq("<p>body 3</p>")
+        expect(Rails.logger).to have_received(:warn).with("[Feeds::ContentSanitizer] StandardError").twice
+      end
+    end
   end
 end

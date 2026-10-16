@@ -17,6 +17,7 @@ module Subscriptions
     end
 
     INTERACTIVE_DEADLINE = 5
+    INTERACTIVE_SANITIZE_BUDGET = 400_000
 
     def self.call(user:, url:, fetcher: Feeds::Fetcher.method(:call))
       new(user: user, url: url, fetcher: fetcher).call
@@ -53,18 +54,22 @@ module Subscriptions
       # 3. If the feed does not exist: check plan limit first (cheap rejection with NO fetch)
       return limit_reached_failure if feed_limit_reached?
 
-      # Concurrency gate for interactive fetch: bounds synchronous fetches so a Puma thread
+      # Concurrency gate for interactive fetch: bounds synchronous fetches and CPU preparation so a Puma thread
       # is always kept free for health checks and auth. Background jobs (R3.5) must NOT use this gate.
-      fetch_result = Feeds::FetchGate.try_run do
-        @fetcher.call(normalized_url, deadline: INTERACTIVE_DEADLINE)
+      gate_result = Feeds::FetchGate.try_run do
+        fetched = @fetcher.call(normalized_url, deadline: INTERACTIVE_DEADLINE)
+        prepared = Feeds::Refresh.prepare(fetched, budget: INTERACTIVE_SANITIZE_BUDGET) if fetched.ok?
+        [ fetched, prepared ]
       end
 
-      if fetch_result == :busy
+      if gate_result == :busy
         return failure(
           error: :busy,
           message: "Too many feed fetches in progress"
         )
       end
+
+      fetch_result, prepared = gate_result
 
       # 4. On a fetch failure: respond immediately and write nothing
       unless fetch_result.ok?
@@ -72,7 +77,7 @@ module Subscriptions
       end
 
       # 5. On success: lock user row and persist
-      subscribe_and_refresh(normalized_url, fetch_result)
+      subscribe_and_refresh(normalized_url, prepared)
     end
 
     private
@@ -178,7 +183,7 @@ module Subscriptions
       result
     end
 
-    def subscribe_and_refresh(normalized_url, fetch_result)
+    def subscribe_and_refresh(normalized_url, prepared)
       result = nil
       @user.with_lock do
         existing_feed = Feed.find_by(url: normalized_url)
@@ -192,7 +197,7 @@ module Subscriptions
           feed = existing_feed || find_or_create_feed(normalized_url)
           subscription, created = find_or_create_subscription(feed)
 
-          refresh_result = Feeds::Refresh.call(feed, fetcher: ->(_url) { fetch_result })
+          refresh_result = Feeds::Refresh.persist(feed, prepared)
           raise "Feeds::Refresh failed unexpectedly: #{refresh_result.error}" unless refresh_result.ok?
 
           feed.reload
