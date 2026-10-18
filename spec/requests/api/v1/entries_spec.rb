@@ -82,12 +82,10 @@ RSpec.describe "Api::V1::Entries", type: :request do
         "title" => "Old Post",
         "author" => "Alice Author",
         "url" => "https://example.com/old",
-        "summary" => "<p>Sanitized summary</p>",
         "published_at" => "2026-10-01T12:00:00Z",
         "read" => false,
         "starred" => false
       )
-      expect(entry_json).not_to have_key("content")
       expect(body["entries"].map { |e| e["id"] }).not_to include(other_entry.id.to_s)
 
       # Deleting the subscription hides its entries
@@ -96,6 +94,19 @@ RSpec.describe "Api::V1::Entries", type: :request do
       get "/api/v1/entries", headers: headers
       expect(response).to have_http_status(:ok)
       expect(response.parsed_body["entries"]).to eq([])
+    end
+
+    it "never includes summary or content keys in the list response" do
+      feed = create(:feed)
+      create(:subscription, user: user, feed: feed)
+      create(:entry, feed: feed, summary: "<p>Summary HTML</p>", content: "<p>Content HTML</p>")
+
+      get "/api/v1/entries", headers: headers
+      expect(response).to have_http_status(:ok)
+
+      entry_json = response.parsed_body["entries"].first
+      expect(entry_json).not_to have_key("summary")
+      expect(entry_json).not_to have_key("content")
     end
   end
 

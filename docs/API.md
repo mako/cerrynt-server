@@ -81,17 +81,17 @@ Query: `subscription_id`, `unread` (`true` or `false`; absent = no filter), `sta
 `200` → `{ "entries": [EntrySummary], "next_cursor": "..." }`. Errors: `bad_request` (invalid `cursor`, `limit`, `unread`, or `starred`), `not_found` (unknown or unowned `subscription_id`).
 
 ### `GET /entries/:id`
-`200` → `{ "entry": Entry }` (includes sanitized `content` HTML)
+`200` → `{ "entry": Entry }` (includes sanitized `summary` and `content` HTML)
 
 `EntrySummary`:
 ```json
 { "id": "...", "subscription_id": "...", "title": "...", "author": "...",
-  "url": "...", "summary": "...", "published_at": "...",
+  "url": "...", "published_at": "...",
   "read": false, "starred": false }
 ```
-`Entry` = `EntrySummary` + `"content": "<p>...</p>"`.
+`Entry` = `EntrySummary` + `"summary": "<p>...</p>", "content": "<p>...</p>"`.
 
-`summary` and `content` are sanitized HTML (fixed tag allow-list, absolute http(s)/mailto links with rel=nofollow noopener noreferrer, no scripts, styles, forms or embeds); every other text field is plain text and must be escaped by clients.
+`summary` and `content` (returned by `GET /entries/:id`) are sanitized HTML (fixed tag allow-list, absolute http(s)/mailto links with rel=nofollow noopener noreferrer, no scripts, styles, forms or embeds); every other text field is plain text and must be escaped by clients.
 
 ### `PATCH /entries/:id/state`
 ```json
@@ -124,5 +124,4 @@ Clients store `cursor` and pass it next time; repeat while `has_more` is true. C
 
 ## Open questions
 
-- All entries currently stored for a subscribed feed are listed, including those published before the subscription.
 - Maximum number of entries kept per feed (retention).

@@ -155,7 +155,6 @@ module Api
             "entries.title",
             "entries.author",
             "entries.url",
-            "entries.summary",
             "entries.published_at",
             "entry_states.read_at AS state_read_at",
             "entry_states.starred_at AS state_starred_at"
