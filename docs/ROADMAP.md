@@ -74,7 +74,7 @@ Design notes:
 
 ## Phase R4 – Reading and sync
 
-- [ ] **R4.1** `GET /api/v1/entries` with `feed_id`, `unread`, `starred`, cursor pagination.
+- [x] **R4.1** `GET /api/v1/entries` with `subscription_id`, `unread`, `starred`, cursor pagination.
 - [ ] **R4.2** `GET /api/v1/entries/:id` (full content). Requires R3.6a (content sanitized at ingest) before content is exposed.
 - [ ] **R4.3** `PATCH /api/v1/entries/:id/state` (read/starred), idempotent; `POST /api/v1/entries/mark_read`.
 - [ ] **R4.4** `GET /api/v1/sync?since=` returns subscriptions, new/changed entries and changed states since the cursor.
@@ -94,7 +94,7 @@ Design notes:
 - [ ] **R6.2** Production config: logging, error reporting, `force_ssl`, host authorization.
 - [ ] **R6.3** Back up the SQLite databases (Litestream or scheduled sqlite3 .backup to S3), keep storage/ as a persistent Kamal volume, test a restore once.
 - [ ] **R6.4** Uptime check and basic alerting.
-- [ ] **R6.5** Abuse protection for a public instance: signup cap or invite code, Rack::Attack, per-user entry/feed limits, per-user cap on active API tokens. Subscribing fetches synchronously and holds a Puma thread for up to the fetch deadline: consider a shorter interactive deadline or moving the first fetch to a job; clean up feeds without subscriptions and orphaned entry_states. Per-user limit of one in-flight interactive fetch, so one account cannot hold all fetch slots.
+- [ ] **R6.5** Abuse protection for a public instance: signup cap or invite code, Rack::Attack, per-user entry/feed limits, per-user cap on active API tokens. Subscribing fetches synchronously and holds a Puma thread for up to the fetch deadline: consider a shorter interactive deadline or moving the first fetch to a job; clean up feeds without subscriptions and orphaned entry_states. Per-user limit of one in-flight interactive fetch, so one account cannot hold all fetch slots. Entry retention (R3.6b) must land before deployment: the entries list scans every stored entry of the subscribed feeds per page.
 - [ ] **R6.6** Public **demo account** documented in the README.
 - [ ] **R6.7** Verify that request.remote_ip is the real client IP behind the production proxy (Kamal proxy/Thruster) and that X-Forwarded-For cannot be spoofed; rate limits depend on it. Smoke-test the rate limits against the deployed instance with the production cache store (e.g. 11 registrations from one IP return 429). Smoke-test the interactive subscribe limits against a deliberately slow test server (a response that never completes): subscribe returns within about 5 s, and with several parallel slow requests GET /up still answers.
 

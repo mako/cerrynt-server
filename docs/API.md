@@ -16,7 +16,7 @@ Base path: `/api/v1`. JSON in, JSON out. This document is the contract between `
 
 | HTTP | `code` | Meaning |
 |---|---|---|
-| 400 | `bad_request` | malformed request or body |
+| 400 | `bad_request` | malformed request or body, or an invalid query parameter; `details.param` names the parameter |
 | 401 | `unauthorized` | missing/invalid/revoked token |
 | 401 | `invalid_credentials` | wrong email or password |
 | 403 | `feed_limit_reached` | plan limit exceeded; `details` has `limit` and `plan` |
@@ -77,21 +77,21 @@ Revokes the current token. `204`.
 ## Entries
 
 ### `GET /entries`
-Query: `subscription_id`, `unread=true`, `starred=true`, `cursor`, `limit`. Ordered by `published_at` desc.
-`200` → `{ "entries": [EntrySummary], "next_cursor": "..." }`
+Query: `subscription_id`, `unread` (`true` or `false`; absent = no filter), `starred` (`true` or `false`; absent = no filter), `cursor`, `limit` (default 50; above 100 is clamped to 100; not an integer or `< 1` returns `400`). Ordered by `published_at` desc, `id` desc. All entries currently stored for a subscribed feed are listed, including those published before the subscription.
+`200` → `{ "entries": [EntrySummary], "next_cursor": "..." }`. Errors: `bad_request` (invalid `cursor`, `limit`, `unread`, or `starred`), `not_found` (unknown or unowned `subscription_id`).
 
 ### `GET /entries/:id`
-`200` → `{ "entry": Entry }` (includes sanitized `content` HTML)
+`200` → `{ "entry": Entry }` (includes sanitized `summary` and `content` HTML)
 
 `EntrySummary`:
 ```json
 { "id": "...", "subscription_id": "...", "title": "...", "author": "...",
-  "url": "...", "summary": "...", "published_at": "...",
+  "url": "...", "published_at": "...",
   "read": false, "starred": false }
 ```
-`Entry` = `EntrySummary` + `"content": "<p>...</p>"`.
+`Entry` = `EntrySummary` + `"summary": "<p>...</p>", "content": "<p>...</p>"`.
 
-`summary` and `content` are sanitized HTML (fixed tag allow-list, absolute http(s)/mailto links with rel=nofollow noopener noreferrer, no scripts, styles, forms or embeds); every other text field is plain text and must be escaped by clients.
+`summary` and `content` (returned by `GET /entries/:id`) are sanitized HTML (fixed tag allow-list, absolute http(s)/mailto links with rel=nofollow noopener noreferrer, no scripts, styles, forms or embeds); every other text field is plain text and must be escaped by clients.
 
 ### `PATCH /entries/:id/state`
 ```json
@@ -124,5 +124,4 @@ Clients store `cursor` and pass it next time; repeat while `has_more` is true. C
 
 ## Open questions
 
-- Should `GET /entries` list entries older than the subscription date, or only newer ones?
 - Maximum number of entries kept per feed (retention).
