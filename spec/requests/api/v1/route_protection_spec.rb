@@ -25,7 +25,7 @@ RSpec.describe "API v1 Route Protection Guard", type: :request do
       "#{verb} #{path}"
     end
 
-    expect(route_signatures).to include("GET /api/v1/me", "DELETE /api/v1/session")
+    expect(route_signatures).to include("GET /api/v1/me", "DELETE /api/v1/session", "GET /api/v1/entries")
   end
 
   it "requires authentication for all non-whitelisted /api/v1 routes" do
