@@ -18,6 +18,16 @@ RSpec.describe Entry, type: :model do
       expect(entry.errors[:url]).to include("can't be blank")
     end
 
+    it "requires a published_at" do
+      entry = build(:entry, published_at: nil)
+      expect(entry).not_to be_valid
+      expect(entry.errors[:published_at]).to include("can't be blank")
+
+      expect {
+        entry.save(validate: false)
+      }.to raise_error(ActiveRecord::NotNullViolation)
+    end
+
     it "requires a unique guid per feed" do
       feed = create(:feed)
       create(:entry, feed: feed, guid: "123")

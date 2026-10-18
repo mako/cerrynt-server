@@ -13,7 +13,7 @@ class EntrySummaryPresenter
       title: @entry.title,
       author: @entry.author,
       url: @entry.url,
-      published_at: @entry.published_at&.utc&.iso8601,
+      published_at: @entry.published_at.utc.iso8601,
       read: @entry.state_read_at.present?,
       starred: @entry.state_starred_at.present?
     }

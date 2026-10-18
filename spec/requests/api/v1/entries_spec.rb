@@ -38,35 +38,19 @@ RSpec.describe "Api::V1::Entries", type: :request do
   end
 
   describe "EntrySummary shape and cross-user isolation (a)" do
-    it "returns EntrySummary fields without content, includes entries older than subscription, and isolates users and deleted subscriptions" do
-      feed_a = create(:feed)
-      feed_only_other = create(:feed)
-
-      old_entry = create(
+    it "returns EntrySummary fields and never includes summary or content" do
+      feed = create(:feed)
+      sub = create(:subscription, user: user, feed: feed)
+      entry = create(
         :entry,
-        feed: feed_a,
-        title: "Old Post",
+        feed: feed,
+        title: "Post Title",
         author: "Alice Author",
-        url: "https://example.com/old",
+        url: "https://example.com/post",
         summary: "<p>Sanitized summary</p>",
-        content: "<p>Full secret content that must not appear in list</p>",
+        content: "<p>Full secret content</p>",
         published_at: Time.utc(2026, 10, 1, 12, 0, 0)
       )
-      other_entry = create(
-        :entry,
-        feed: feed_only_other,
-        title: "Bob Only Post",
-        published_at: Time.utc(2026, 10, 2, 12, 0, 0)
-      )
-
-      sub_a = travel_to(Time.utc(2026, 10, 10, 12, 0, 0)) do
-        create(:subscription, user: user, feed: feed_a)
-      end
-      create(:subscription, user: other_user, feed: feed_only_other)
-      create(:subscription, user: other_user, feed: feed_a)
-
-      # Other user marks old_entry read & starred; must not affect user
-      create(:entry_state, user: other_user, entry: old_entry, read_at: Time.current, starred_at: Time.current)
 
       get "/api/v1/entries", headers: headers
       expect(response).to have_http_status(:ok)
@@ -77,36 +61,60 @@ RSpec.describe "Api::V1::Entries", type: :request do
 
       entry_json = body["entries"].first
       expect(entry_json).to eq(
-        "id" => old_entry.id.to_s,
-        "subscription_id" => sub_a.id.to_s,
-        "title" => "Old Post",
+        "id" => entry.id.to_s,
+        "subscription_id" => sub.id.to_s,
+        "title" => "Post Title",
         "author" => "Alice Author",
-        "url" => "https://example.com/old",
+        "url" => "https://example.com/post",
         "published_at" => "2026-10-01T12:00:00Z",
         "read" => false,
         "starred" => false
       )
-      expect(body["entries"].map { |e| e["id"] }).not_to include(other_entry.id.to_s)
+      expect(entry_json).not_to have_key("summary")
+      expect(entry_json).not_to have_key("content")
+    end
 
-      # Deleting the subscription hides its entries
+    it "lists entries published before the subscription was created" do
+      feed = create(:feed)
+      old_entry = create(:entry, feed: feed, published_at: Time.utc(2026, 10, 1, 12, 0, 0))
+      newer_entry = create(:entry, feed: feed, published_at: Time.utc(2026, 10, 15, 12, 0, 0))
+
+      travel_to(Time.utc(2026, 10, 10, 12, 0, 0)) do
+        create(:subscription, user: user, feed: feed)
+      end
+
+      get "/api/v1/entries", headers: headers
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body["entries"].map { |e| e["id"] }).to eq([ newer_entry.id.to_s, old_entry.id.to_s ])
+    end
+
+    it "isolates entries and entry states between users and hides entries of a deleted subscription" do
+      feed_a = create(:feed)
+      feed_only_other = create(:feed)
+
+      shared_entry = create(:entry, feed: feed_a, published_at: Time.utc(2026, 10, 1, 12, 0, 0))
+      other_entry = create(:entry, feed: feed_only_other, published_at: Time.utc(2026, 10, 2, 12, 0, 0))
+
+      sub_a = create(:subscription, user: user, feed: feed_a)
+      create(:subscription, user: other_user, feed: feed_only_other)
+      create(:subscription, user: other_user, feed: feed_a)
+
+      create(:entry_state, user: other_user, entry: shared_entry, read_at: Time.current, starred_at: Time.current)
+
+      get "/api/v1/entries", headers: headers
+      expect(response).to have_http_status(:ok)
+
+      entries = response.parsed_body["entries"]
+      expect(entries.map { |e| e["id"] }).to eq([ shared_entry.id.to_s ])
+      expect(entries.map { |e| e["id"] }).not_to include(other_entry.id.to_s)
+      expect(entries.first["read"]).to be(false)
+      expect(entries.first["starred"]).to be(false)
+
       sub_a.destroy!
 
       get "/api/v1/entries", headers: headers
       expect(response).to have_http_status(:ok)
       expect(response.parsed_body["entries"]).to eq([])
-    end
-
-    it "never includes summary or content keys in the list response" do
-      feed = create(:feed)
-      create(:subscription, user: user, feed: feed)
-      create(:entry, feed: feed, summary: "<p>Summary HTML</p>", content: "<p>Content HTML</p>")
-
-      get "/api/v1/entries", headers: headers
-      expect(response).to have_http_status(:ok)
-
-      entry_json = response.parsed_body["entries"].first
-      expect(entry_json).not_to have_key("summary")
-      expect(entry_json).not_to have_key("content")
     end
   end
 

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_10_02_232119) do
+ActiveRecord::Schema[8.1].define(version: 2026_10_18_214000) do
   create_table "api_tokens", force: :cascade do |t|
     t.integer "user_id", null: false
     t.string "token_digest", null: false
@@ -31,7 +31,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_02_232119) do
     t.string "author"
     t.text "summary"
     t.text "content"
-    t.datetime "published_at"
+    t.datetime "published_at", null: false
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.index ["feed_id", "guid"], name: "index_entries_on_feed_id_and_guid", unique: true
