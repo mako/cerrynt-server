@@ -9,6 +9,7 @@ module Api
     class EntriesController < BaseController
       DEFAULT_LIMIT = 50
       MAX_LIMIT = 100
+      MAX_ID = (1 << 63) - 1
       ISO8601_REGEX = /\A\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})\z/
 
       InvalidParamError = Struct.new(:param)
@@ -24,7 +25,7 @@ module Api
           )
         end
 
-        subscription, subscription_ids_by_feed_id = resolve_subscriptions!
+        subscription = resolve_subscription!
 
         rows = fetch_entries(
           subscription: subscription,
@@ -39,17 +40,29 @@ module Api
         next_cursor = has_more ? encode_cursor(page_entries.last) : nil
 
         render json: {
-          entries: page_entries.map do |entry|
-            EntrySummaryPresenter.new(
-              entry,
-              subscription_id: subscription_ids_by_feed_id[entry.feed_id]
-            ).as_json
-          end,
+          entries: page_entries.map { |entry| EntrySummaryPresenter.new(entry).as_json },
           next_cursor: next_cursor
         }
       end
 
+      def show
+        id = parse_positive_id(params[:id])
+        return render_not_found unless id
+
+        entry = Entry.visible_to(current_user).find_by(id: id)
+        return render_not_found unless entry
+
+        render json: { entry: EntryPresenter.new(entry).as_json }
+      end
+
       private
+
+      def parse_positive_id(raw)
+        return nil unless raw.is_a?(String) && raw.match?(/\A[1-9]\d*\z/)
+
+        value = raw.to_i
+        value <= MAX_ID ? value : nil
+      end
 
       def parse_query_params
         limit = parse_limit
@@ -125,41 +138,17 @@ module Api
         Base64.urlsafe_encode64(JSON.generate(payload), padding: false)
       end
 
-      def resolve_subscriptions!
-        subscriptions_scope = current_user.subscriptions
-        if params.key?(:subscription_id)
-          raw_sub_id = params[:subscription_id]
-          raise ActiveRecord::RecordNotFound unless raw_sub_id.is_a?(String) && raw_sub_id.match?(/\A\d+\z/)
+      def resolve_subscription!
+        return nil unless params.key?(:subscription_id)
 
-          subscription = subscriptions_scope.find(raw_sub_id)
-          [ subscription, { subscription.feed_id => subscription.id.to_s } ]
-        else
-          map = subscriptions_scope.pluck(:feed_id, :id).to_h.transform_values(&:to_s)
-          [ nil, map ]
-        end
+        sub_id = parse_positive_id(params[:subscription_id])
+        raise ActiveRecord::RecordNotFound unless sub_id
+
+        current_user.subscriptions.find(sub_id)
       end
 
       def fetch_entries(subscription:, unread:, starred:, cursor:, limit:)
-        state_join_sql = Entry.sanitize_sql_array([
-          "LEFT JOIN entry_states ON entry_states.entry_id = entries.id AND entry_states.user_id = ?",
-          current_user.id
-        ])
-
-        scope = Entry
-          .joins("INNER JOIN subscriptions ON subscriptions.feed_id = entries.feed_id")
-          .where(subscriptions: { user_id: current_user.id })
-          .joins(state_join_sql)
-          .select(
-            "entries.id",
-            "entries.feed_id",
-            "entries.title",
-            "entries.author",
-            "entries.url",
-            "entries.published_at",
-            "entry_states.read_at AS state_read_at",
-            "entry_states.starred_at AS state_starred_at"
-          )
-
+        scope = Entry.visible_to(current_user).reselect(*Entry::SUMMARY_COLUMNS)
         scope = scope.where(subscriptions: { id: subscription.id }) if subscription
 
         if unread == true

@@ -75,7 +75,7 @@ Design notes:
 ## Phase R4 – Reading and sync
 
 - [x] **R4.1** `GET /api/v1/entries` with `subscription_id`, `unread`, `starred`, cursor pagination.
-- [ ] **R4.2** `GET /api/v1/entries/:id` (full content). Requires R3.6a (content sanitized at ingest) before content is exposed.
+- [x] **R4.2** `GET /api/v1/entries/:id` (full content). Requires R3.6a (content sanitized at ingest) before content is exposed.
 - [ ] **R4.3** `PATCH /api/v1/entries/:id/state` (read/starred), idempotent; `POST /api/v1/entries/mark_read`.
 - [ ] **R4.4** `GET /api/v1/sync?since=` returns subscriptions, new/changed entries and changed states since the cursor.
 - [ ] **R4.5** OPML import and export. Parse OPML with safe Nokogiri options (no entity substitution, no network, reject DTD declarations); same XXE rule as the feed fetcher.

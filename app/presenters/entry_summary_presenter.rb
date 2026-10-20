@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 class EntrySummaryPresenter
-  def initialize(entry, subscription_id:)
+  def initialize(entry, subscription_id: entry[:subscription_id])
     @entry = entry
     @subscription_id = subscription_id
   end
@@ -14,8 +14,8 @@ class EntrySummaryPresenter
       author: @entry.author,
       url: @entry.url,
       published_at: @entry.published_at.utc.iso8601,
-      read: @entry.state_read_at.present?,
-      starred: @entry.state_starred_at.present?
+      read: @entry[:state_read_at].present?,
+      starred: @entry[:state_starred_at].present?
     }
   end
 end

@@ -357,4 +357,158 @@ RSpec.describe "Api::V1::Entries", type: :request do
       expect(queries_5_subs_100_entries).to eq(queries_1_sub_5_entries)
     end
   end
+
+  describe "GET /api/v1/entries/:id" do
+    let(:feed) { create(:feed) }
+    let!(:subscription) { create(:subscription, user: user, feed: feed) }
+    let!(:entry) do
+      create(
+        :entry,
+        feed: feed,
+        title: "Detailed Post",
+        author: "Alice Author",
+        url: "https://example.com/detailed",
+        summary: "<p>Sanitized summary</p>",
+        content: "<p>Sanitized full content</p>",
+        published_at: Time.utc(2026, 10, 5, 14, 30, 0)
+      )
+    end
+
+    it "returns the exact Entry key set with summary and content, serializes id and subscription_id as Strings in list and show, and reflects read/starred state" do
+      get "/api/v1/entries", headers: headers
+      expect(response).to have_http_status(:ok)
+      list_entry = response.parsed_body["entries"].first
+      expect(list_entry["id"]).to be_a(String)
+      expect(list_entry["subscription_id"]).to be_a(String)
+
+      get "/api/v1/entries/#{entry.id}", headers: headers
+      expect(response).to have_http_status(:ok)
+
+      show_entry = response.parsed_body["entry"]
+      expect(show_entry["id"]).to be_a(String)
+      expect(show_entry["subscription_id"]).to be_a(String)
+
+      expect(response.parsed_body).to eq(
+        "entry" => {
+          "id" => entry.id.to_s,
+          "subscription_id" => subscription.id.to_s,
+          "title" => "Detailed Post",
+          "author" => "Alice Author",
+          "url" => "https://example.com/detailed",
+          "published_at" => "2026-10-05T14:30:00Z",
+          "read" => false,
+          "starred" => false,
+          "summary" => "<p>Sanitized summary</p>",
+          "content" => "<p>Sanitized full content</p>"
+        }
+      )
+
+      create(:entry_state, user: user, entry: entry, read_at: Time.current, starred_at: Time.current)
+
+      get "/api/v1/entries/#{entry.id}", headers: headers
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body["entry"]["read"]).to be(true)
+      expect(response.parsed_body["entry"]["starred"]).to be(true)
+    end
+
+    it "serializes nil summary and content as null" do
+      bare_entry = create(:entry, feed: feed, summary: nil, content: nil)
+
+      get "/api/v1/entries/#{bare_entry.id}", headers: headers
+      expect(response).to have_http_status(:ok)
+
+      entry_json = response.parsed_body["entry"]
+      expect(entry_json).to have_key("summary")
+      expect(entry_json).to have_key("content")
+      expect(entry_json["summary"]).to be_nil
+      expect(entry_json["content"]).to be_nil
+    end
+
+    it "isolates read/starred state and subscription_id when two users subscribe to the same feed" do
+      other_sub = create(:subscription, user: other_user, feed: feed)
+      create(:entry_state, user: other_user, entry: entry, read_at: Time.current, starred_at: Time.current)
+
+      get "/api/v1/entries/#{entry.id}", headers: headers
+      expect(response).to have_http_status(:ok)
+      user_entry = response.parsed_body["entry"]
+      expect(user_entry["subscription_id"]).to eq(subscription.id.to_s)
+      expect(user_entry["read"]).to be(false)
+      expect(user_entry["starred"]).to be(false)
+
+      get "/api/v1/entries/#{entry.id}", headers: other_headers
+      expect(response).to have_http_status(:ok)
+      other_entry = response.parsed_body["entry"]
+      expect(other_entry["subscription_id"]).to eq(other_sub.id.to_s)
+      expect(other_entry["read"]).to be(true)
+      expect(other_entry["starred"]).to be(true)
+    end
+
+    it "returns 404 not_found with identical bodies for an unfollowed feed's entry, an unknown id, and garbage ids (non-numeric, 30-digit, '0')" do
+      unfollowed_feed = create(:feed)
+      create(:subscription, user: other_user, feed: unfollowed_feed)
+      foreign_entry = create(:entry, feed: unfollowed_feed)
+
+      get "/api/v1/entries/#{foreign_entry.id}", headers: headers
+      expect(response).to have_http_status(:not_found)
+      foreign_body = response.body
+
+      [ "999999999", "not-an-id", "#{entry.id}abc", "9" * 30, "0", "-1" ].each do |invalid_id|
+        get "/api/v1/entries/#{invalid_id}", headers: headers
+        expect(response).to have_http_status(:not_found), "Expected 404 for id=#{invalid_id.inspect}, got #{response.status}"
+        expect(response.body).to eq(foreign_body)
+      end
+
+      expect(response.parsed_body).to eq(
+        "error" => {
+          "code" => "not_found",
+          "message" => "Resource not found",
+          "details" => {}
+        }
+      )
+    end
+
+    it "makes a previously visible entry return 404 after unsubscribing, agreeing with the list endpoint on visibility" do
+      get "/api/v1/entries", headers: headers
+      expect(response.parsed_body["entries"].map { |e| e["id"] }).to include(entry.id.to_s)
+
+      get "/api/v1/entries/#{entry.id}", headers: headers
+      expect(response).to have_http_status(:ok)
+
+      subscription.destroy!
+
+      get "/api/v1/entries", headers: headers
+      expect(response.parsed_body["entries"].map { |e| e["id"] }).not_to include(entry.id.to_s)
+
+      get "/api/v1/entries/#{entry.id}", headers: headers
+      expect(response).to have_http_status(:not_found)
+    end
+
+    it "returns 401 unauthorized for a missing or revoked token" do
+      get "/api/v1/entries/#{entry.id}"
+      expect(response).to have_http_status(:unauthorized)
+      expect(response.parsed_body["error"]["code"]).to eq("unauthorized")
+
+      revoked_record, revoked_raw = ApiToken.issue!(user: user, name: "revoked-device")
+      revoked_record.update!(revoked_at: Time.current)
+
+      get "/api/v1/entries/#{entry.id}", headers: { "Authorization" => "Bearer #{revoked_raw}" }
+      expect(response).to have_http_status(:unauthorized)
+      expect(response.parsed_body["error"]["code"]).to eq("unauthorized")
+    end
+
+    it "executes a single entry query without N+1 or extra per-field queries" do
+      create(:entry_state, user: user, entry: entry, read_at: Time.current, starred_at: Time.current)
+
+      # Warm up auth token last_used_at throttle
+      get "/api/v1/entries/#{entry.id}", headers: headers
+      expect(response).to have_http_status(:ok)
+
+      # 1 query for ApiToken + 1 query for User (auth) + 1 query for Entry.visible_to = 3 total
+      query_count = count_queries do
+        get "/api/v1/entries/#{entry.id}", headers: headers
+      end
+      expect(response).to have_http_status(:ok)
+      expect(query_count).to eq(3)
+    end
+  end
 end
