@@ -55,7 +55,120 @@ module Api
         render json: { entry: EntryPresenter.new(entry).as_json }
       end
 
+      def state
+        id = parse_positive_id(params[:id])
+        return render_not_found unless id
+
+        state_params = parse_state_params
+        if state_params.is_a?(InvalidParamError)
+          return render_error(
+            code: :bad_request,
+            message: "Invalid #{state_params.param} parameter",
+            status: :bad_request,
+            details: { param: state_params.param.to_s }
+          )
+        end
+
+        visible_scope = Entry.visible_to(current_user).reselect(*Entry::SUMMARY_COLUMNS)
+        entry = visible_scope.find_by(id: id)
+        return render_not_found unless entry
+
+        Entries::UpdateState.call(
+          user: current_user,
+          entry_id: entry.id,
+          read: state_params[:read],
+          starred: state_params[:starred]
+        )
+
+        updated_entry = visible_scope.find_by(id: entry.id)
+        return render_not_found unless updated_entry
+
+        render json: { entry: EntrySummaryPresenter.new(updated_entry).as_json }
+      end
+
+      def mark_read
+        mark_params = parse_mark_read_params
+        if mark_params.is_a?(InvalidParamError)
+          return render_error(
+            code: :bad_request,
+            message: "Invalid #{mark_params.param} parameter",
+            status: :bad_request,
+            details: { param: mark_params.param.to_s }
+          )
+        end
+
+        subscription_id = nil
+        if mark_params[:has_subscription_id]
+          sub_id = parse_positive_id(mark_params[:raw_subscription_id])
+          return render_not_found unless sub_id
+
+          subscription = current_user.subscriptions.find_by(id: sub_id)
+          return render_not_found unless subscription
+
+          subscription_id = subscription.id
+        end
+
+        marked = Entries::MarkRead.call(
+          user: current_user,
+          subscription_id: subscription_id,
+          before: mark_params[:before]
+        )
+
+        render json: { marked: marked }
+      end
+
       private
+
+      def parse_mark_read_params
+        body = request.request_parameters
+        return InvalidParamError.new(:before) unless body.is_a?(Hash)
+
+        has_subscription_id = body.key?("subscription_id")
+        has_before = body.key?("before")
+        return InvalidParamError.new(:before) unless has_subscription_id || has_before
+
+        before_time = nil
+        if has_before
+          before_time = parse_iso8601_timestamp(body["before"])
+          return InvalidParamError.new(:before) unless before_time
+        end
+
+        {
+          has_subscription_id: has_subscription_id,
+          raw_subscription_id: body["subscription_id"],
+          before: before_time
+        }
+      end
+
+      def parse_iso8601_timestamp(raw)
+        return nil unless raw.is_a?(String) && raw.match?(ISO8601_REGEX)
+
+        DateTime.iso8601(raw).to_time.utc
+      rescue ArgumentError
+        nil
+      end
+
+      def parse_state_params
+        body = request.request_parameters
+        return InvalidParamError.new(:state) unless body.is_a?(Hash)
+
+        has_read = body.key?("read")
+        has_starred = body.key?("starred")
+        return InvalidParamError.new(:state) unless has_read || has_starred
+
+        if has_read && body["read"] != true && body["read"] != false
+          return InvalidParamError.new(:read)
+        end
+
+        if has_starred && body["starred"] != true && body["starred"] != false
+          return InvalidParamError.new(:starred)
+        end
+
+        {
+          read: has_read ? body["read"] : nil,
+          starred: has_starred ? body["starred"] : nil
+        }
+      end
 
       def parse_positive_id(raw)
         return nil unless raw.is_a?(String) && raw.match?(/\A[1-9]\d*\z/)
