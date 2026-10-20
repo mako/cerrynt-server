@@ -107,4 +107,45 @@ RSpec.describe Entry, type: :model do
       expect(counts).to eq({ feed1.id => 2, feed2.id => 1 })
     end
   end
+
+  describe ".visible_to" do
+    let(:user) { create(:user) }
+    let(:other_user) { create(:user) }
+    let(:shared_feed) { create(:feed) }
+    let(:other_feed) { create(:feed) }
+
+    it "returns only entries for feeds the user follows, exposes subscription_id and user state, and never leaks another user's subscription or state" do
+      user_sub = create(:subscription, user: user, feed: shared_feed)
+      create(:subscription, user: other_user, feed: shared_feed)
+      create(:subscription, user: other_user, feed: other_feed)
+
+      entry_no_state = create(:entry, feed: shared_feed, guid: "v-1")
+      entry_with_state = create(:entry, feed: shared_feed, guid: "v-2")
+      _foreign_entry = create(:entry, feed: other_feed, guid: "v-3")
+
+      # Other user marks entry_no_state as read & starred; user has no state row for it
+      create(:entry_state, user: other_user, entry: entry_no_state, read_at: 1.hour.ago, starred_at: 1.hour.ago)
+      # User marks entry_with_state as read & starred
+      read_time = 30.minutes.ago
+      star_time = 20.minutes.ago
+      create(:entry_state, user: user, entry: entry_with_state, read_at: read_time, starred_at: star_time)
+
+      rel = described_class.visible_to(user)
+      expect(rel.exists?(id: entry_no_state.id)).to be(true)
+      expect(rel.pluck(:id)).to contain_exactly(entry_no_state.id, entry_with_state.id)
+
+      by_id = rel.index_by(&:id)
+      expect(by_id.keys).to contain_exactly(entry_no_state.id, entry_with_state.id)
+
+      e1 = by_id[entry_no_state.id]
+      expect(e1[:subscription_id]).to eq(user_sub.id)
+      expect(e1[:state_read_at]).to be_nil
+      expect(e1[:state_starred_at]).to be_nil
+
+      e2 = by_id[entry_with_state.id]
+      expect(e2[:subscription_id]).to eq(user_sub.id)
+      expect(e2[:state_read_at]).to be_present
+      expect(e2[:state_starred_at]).to be_present
+    end
+  end
 end
