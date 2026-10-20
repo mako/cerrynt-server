@@ -55,7 +55,60 @@ module Api
         render json: { entry: EntryPresenter.new(entry).as_json }
       end
 
+      def state
+        id = parse_positive_id(params[:id])
+        return render_not_found unless id
+
+        state_params = parse_state_params
+        if state_params.is_a?(InvalidParamError)
+          return render_error(
+            code: :bad_request,
+            message: "Invalid #{state_params.param} parameter",
+            status: :bad_request,
+            details: { param: state_params.param.to_s }
+          )
+        end
+
+        visible_scope = Entry.visible_to(current_user).reselect(*Entry::SUMMARY_COLUMNS)
+        entry = visible_scope.find_by(id: id)
+        return render_not_found unless entry
+
+        Entries::UpdateState.call(
+          user: current_user,
+          entry_id: entry.id,
+          read: state_params[:read],
+          starred: state_params[:starred]
+        )
+
+        updated_entry = visible_scope.find_by(id: entry.id)
+        return render_not_found unless updated_entry
+
+        render json: { entry: EntrySummaryPresenter.new(updated_entry).as_json }
+      end
+
       private
+
+      def parse_state_params
+        body = request.request_parameters
+        return InvalidParamError.new(:state) unless body.is_a?(Hash)
+
+        has_read = body.key?("read")
+        has_starred = body.key?("starred")
+        return InvalidParamError.new(:state) unless has_read || has_starred
+
+        if has_read && body["read"] != true && body["read"] != false
+          return InvalidParamError.new(:read)
+        end
+
+        if has_starred && body["starred"] != true && body["starred"] != false
+          return InvalidParamError.new(:starred)
+        end
+
+        {
+          read: has_read ? body["read"] : nil,
+          starred: has_starred ? body["starred"] : nil
+        }
+      end
 
       def parse_positive_id(raw)
         return nil unless raw.is_a?(String) && raw.match?(/\A[1-9]\d*\z/)

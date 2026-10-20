@@ -6,7 +6,9 @@ Rails.application.routes.draw do
       resource :session, only: :destroy
       resource :me, only: :show, controller: "me"
       resources :subscriptions, only: %i[index create destroy]
-      resources :entries, only: %i[index show]
+      resources :entries, only: %i[index show] do
+        patch :state, on: :member
+      end
 
       # The catch-all route must remain the LAST route in the api/v1 namespace
       match "*unmatched", to: "errors#not_found", via: :all

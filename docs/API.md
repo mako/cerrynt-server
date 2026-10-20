@@ -97,13 +97,15 @@ Query: `subscription_id`, `unread` (`true` or `false`; absent = no filter), `sta
 ```json
 { "read": true, "starred": false }
 ```
-Either field optional. Idempotent. `200` → `{ "entry": EntrySummary }`
+At least one of `read` / `starred` is required; each must be a JSON boolean (`true` sets the flag, `false` clears it). Unknown extra keys are ignored. Idempotent: repeating a request changes nothing.
+`200` → `{ "entry": EntrySummary }`. Errors: `bad_request` (`details.param` is `state` when both fields are absent, or `read` / `starred` when a value is not a boolean, including null), `not_found` (unknown or not yours).
 
 ### `POST /entries/mark_read`
 ```json
 { "subscription_id": "...", "before": "2026-10-02T12:00:00Z" }
 ```
-Marks matching entries as read. `200` → `{ "marked": 37 }`
+At least one of `subscription_id` / `before` is required. `before` is an ISO 8601 timestamp with a zone; entries with `published_at <= before` match. Marks the matching unread entries of your subscriptions as read; `marked` counts only entries that changed from unread to read (to mark everything, send `before` = now).
+`200` → `{ "marked": 37 }`. Errors: `bad_request` (`details.param` is `before` when invalid or when both parameters are absent), `not_found` (unknown or not yours `subscription_id`).
 
 ## Sync
 

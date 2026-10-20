@@ -511,4 +511,268 @@ RSpec.describe "Api::V1::Entries", type: :request do
       expect(query_count).to eq(3)
     end
   end
+
+  describe "PATCH /api/v1/entries/:id/state" do
+    let(:feed) { create(:feed) }
+    let!(:subscription) { create(:subscription, user: user, feed: feed) }
+    let!(:entry) do
+      create(
+        :entry,
+        feed: feed,
+        title: "State Post",
+        author: "Alice Author",
+        url: "https://example.com/state-post",
+        summary: "<p>Summary</p>",
+        content: "<p>Content</p>",
+        published_at: Time.utc(2026, 10, 5, 14, 30, 0)
+      )
+    end
+
+    it "sets and clears read and starred, returning an EntrySummary with String ids and no summary or content" do
+      patch "/api/v1/entries/#{entry.id}/state",
+            params: { read: true, extra_ignored: "value" },
+            headers: headers,
+            as: :json
+      expect(response).to have_http_status(:ok)
+
+      entry_json = response.parsed_body["entry"]
+      expect(entry_json["id"]).to be_a(String)
+      expect(entry_json["subscription_id"]).to be_a(String)
+      expect(entry_json).to eq(
+        "id" => entry.id.to_s,
+        "subscription_id" => subscription.id.to_s,
+        "title" => "State Post",
+        "author" => "Alice Author",
+        "url" => "https://example.com/state-post",
+        "published_at" => "2026-10-05T14:30:00Z",
+        "read" => true,
+        "starred" => false
+      )
+      expect(entry_json).not_to have_key("summary")
+      expect(entry_json).not_to have_key("content")
+
+      patch "/api/v1/entries/#{entry.id}/state",
+            params: { starred: true },
+            headers: headers,
+            as: :json
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body["entry"]).to include("read" => true, "starred" => true)
+
+      patch "/api/v1/entries/#{entry.id}/state",
+            params: { read: false },
+            headers: headers,
+            as: :json
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body["entry"]).to include("read" => false, "starred" => true)
+
+      patch "/api/v1/entries/#{entry.id}/state",
+            params: { starred: false },
+            headers: headers,
+            as: :json
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body["entry"]).to include("read" => false, "starred" => false)
+    end
+
+    it "is idempotent: repeating a request preserves read_at/starred_at and updated_at, mixed requests preserve the unchanged timestamp, and clearing both keeps the row and bumps updated_at" do
+      t1 = Time.utc(2026, 10, 10, 10, 0, 0)
+      t2 = Time.utc(2026, 10, 10, 11, 0, 0)
+      t3 = Time.utc(2026, 10, 10, 12, 0, 0)
+      t4 = Time.utc(2026, 10, 10, 13, 0, 0)
+      t5 = Time.utc(2026, 10, 10, 14, 0, 0)
+
+      # 1. Set read: true at t1
+      travel_to(t1) do
+        patch "/api/v1/entries/#{entry.id}/state", params: { read: true }, headers: headers, as: :json
+        expect(response).to have_http_status(:ok)
+      end
+      state = EntryState.find_by!(user_id: user.id, entry_id: entry.id)
+      expect(state.read_at).to eq(t1)
+      expect(state.starred_at).to be_nil
+      expect(state.updated_at).to eq(t1)
+
+      # 2. Repeat read: true at t2 -> no-op, read_at and updated_at stay t1
+      travel_to(t2) do
+        patch "/api/v1/entries/#{entry.id}/state", params: { read: true }, headers: headers, as: :json
+        expect(response).to have_http_status(:ok)
+      end
+      state.reload
+      expect(state.read_at).to eq(t1)
+      expect(state.updated_at).to eq(t1)
+
+      # 3. Mixed request { read: true, starred: true } at t3 -> read_at stays t1, starred_at and updated_at become t3
+      travel_to(t3) do
+        patch "/api/v1/entries/#{entry.id}/state", params: { read: true, starred: true }, headers: headers, as: :json
+        expect(response).to have_http_status(:ok)
+      end
+      state.reload
+      expect(state.read_at).to eq(t1)
+      expect(state.starred_at).to eq(t3)
+      expect(state.updated_at).to eq(t3)
+
+      # 4. Repeat { read: true, starred: true } at t4 -> no-op, timestamps and updated_at stay as before
+      travel_to(t4) do
+        patch "/api/v1/entries/#{entry.id}/state", params: { read: true, starred: true }, headers: headers, as: :json
+        expect(response).to have_http_status(:ok)
+      end
+      state.reload
+      expect(state.read_at).to eq(t1)
+      expect(state.starred_at).to eq(t3)
+      expect(state.updated_at).to eq(t3)
+
+      # 5. Clear both { read: false, starred: false } at t5 -> row is KEPT, both nil, updated_at bumped to t5
+      travel_to(t5) do
+        patch "/api/v1/entries/#{entry.id}/state", params: { read: false, starred: false }, headers: headers, as: :json
+        expect(response).to have_http_status(:ok)
+      end
+      expect(EntryState.exists?(id: state.id)).to be(true)
+      state.reload
+      expect(state.read_at).to be_nil
+      expect(state.starred_at).to be_nil
+      expect(state.updated_at).to eq(t5)
+    end
+
+    it "creates no row on a no-op false request when no state row exists" do
+      expect {
+        patch "/api/v1/entries/#{entry.id}/state",
+              params: { read: false, starred: false },
+              headers: headers,
+              as: :json
+      }.not_to change(EntryState, :count)
+
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body["entry"]).to include("read" => false, "starred" => false)
+    end
+
+    it "returns 400 bad_request with details.param='state' when both read and starred are absent or only unknown keys are given" do
+      [ {}, { unknown: true } ].each do |bad_body|
+        expect {
+          patch "/api/v1/entries/#{entry.id}/state", params: bad_body, headers: headers, as: :json
+        }.not_to change(EntryState, :count)
+
+        expect(response).to have_http_status(:bad_request)
+        expect(response.parsed_body["error"]).to include(
+          "code" => "bad_request",
+          "details" => { "param" => "state" }
+        )
+      end
+    end
+
+    it "returns 400 bad_request with details.param='read' or 'starred' when a value is not a JSON boolean (including null)" do
+      [ "true", "false", 1, 0, nil, [], {} ].each do |bad_val|
+        patch "/api/v1/entries/#{entry.id}/state", params: { read: bad_val }, headers: headers, as: :json
+        expect(response).to have_http_status(:bad_request)
+        expect(response.parsed_body["error"]).to include(
+          "code" => "bad_request",
+          "details" => { "param" => "read" }
+        )
+
+        patch "/api/v1/entries/#{entry.id}/state", params: { starred: bad_val }, headers: headers, as: :json
+        expect(response).to have_http_status(:bad_request)
+        expect(response.parsed_body["error"]).to include(
+          "code" => "bad_request",
+          "details" => { "param" => "starred" }
+        )
+      end
+    end
+
+    it "returns identical 404 not_found bodies and creates zero entry_states rows for foreign, unknown, and garbage ids" do
+      unfollowed_feed = create(:feed)
+      create(:subscription, user: other_user, feed: unfollowed_feed)
+      foreign_entry = create(:entry, feed: unfollowed_feed)
+
+      expect {
+        patch "/api/v1/entries/#{foreign_entry.id}/state", params: { read: true }, headers: headers, as: :json
+      }.not_to change(EntryState, :count)
+      expect(response).to have_http_status(:not_found)
+      foreign_body = response.body
+
+      [ "999999999", "not-an-id", "#{entry.id}abc", "9" * 30, "0", "-1" ].each do |invalid_id|
+        expect {
+          patch "/api/v1/entries/#{invalid_id}/state", params: { read: true }, headers: headers, as: :json
+        }.not_to change(EntryState, :count)
+        expect(response).to have_http_status(:not_found)
+        expect(response.body).to eq(foreign_body)
+      end
+
+      expect(response.parsed_body["error"]["code"]).to eq("not_found")
+    end
+
+    it "keeps entry_states completely independent between two users subscribed to the same feed" do
+      create(:subscription, user: other_user, feed: feed)
+      other_t = Time.utc(2026, 10, 10, 9, 0, 0)
+      other_state = create(:entry_state, user: other_user, entry: entry, read_at: nil, starred_at: other_t, updated_at: other_t)
+
+      patch "/api/v1/entries/#{entry.id}/state", params: { read: true }, headers: headers, as: :json
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body["entry"]).to include("read" => true, "starred" => false)
+
+      other_state.reload
+      expect(other_state.read_at).to be_nil
+      expect(other_state.starred_at).to eq(other_t)
+      expect(other_state.updated_at).to eq(other_t)
+
+      get "/api/v1/entries/#{entry.id}", headers: other_headers
+      expect(response.parsed_body["entry"]).to include("read" => false, "starred" => true)
+    end
+
+    it "handles a first-write race on [user_id, entry_id] cleanly, leaving exactly one row with the merged state" do
+      t1 = Time.utc(2026, 10, 10, 10, 0, 0)
+      t2 = Time.utc(2026, 10, 10, 11, 0, 0)
+
+      create(:entry_state, user: user, entry: entry, read_at: nil, starred_at: t1, created_at: t1, updated_at: t1)
+
+      locked_relation = EntryState.lock
+      calls = 0
+      allow(EntryState).to receive(:lock).and_return(locked_relation)
+      allow(locked_relation).to receive(:find_by).and_wrap_original do |original, *args|
+        calls += 1
+        calls == 1 ? nil : original.call(*args)
+      end
+
+      travel_to(t2) do
+        patch "/api/v1/entries/#{entry.id}/state", params: { read: true }, headers: headers, as: :json
+        expect(response).to have_http_status(:ok)
+      end
+
+      expect(calls).to eq(2)
+      expect(response.parsed_body["entry"]).to include("read" => true, "starred" => true)
+      expect(EntryState.where(user_id: user.id, entry_id: entry.id).count).to eq(1)
+    end
+
+    it "returns 401 unauthorized without an Authorization token" do
+      patch "/api/v1/entries/#{entry.id}/state", params: { read: true }, as: :json
+      expect(response).to have_http_status(:unauthorized)
+      expect(response.parsed_body["error"]["code"]).to eq("unauthorized")
+    end
+
+    it "executes a constant number of SQL queries" do
+      # Warm up auth token last_used_at throttle
+      get "/api/v1/entries/#{entry.id}", headers: headers
+
+      queries_create = count_queries do
+        patch "/api/v1/entries/#{entry.id}/state", params: { read: true }, headers: headers, as: :json
+      end
+      expect(response).to have_http_status(:ok)
+
+      queries_update = count_queries do
+        patch "/api/v1/entries/#{entry.id}/state", params: { starred: true }, headers: headers, as: :json
+      end
+      expect(response).to have_http_status(:ok)
+
+      expect(queries_update).to eq(queries_create)
+    end
+
+    it "returns 404 not_found with the standard body if the subscription is deleted before the re-read" do
+      get "/api/v1/entries/999999999", headers: headers
+      expected_not_found_body = response.body
+
+      allow(Entries::UpdateState).to receive(:call) do
+        subscription.destroy!
+      end
+
+      patch "/api/v1/entries/#{entry.id}/state", params: { read: true }, headers: headers, as: :json
+      expect(response).to have_http_status(:not_found)
+      expect(response.body).to eq(expected_not_found_body)
+    end
+  end
 end
