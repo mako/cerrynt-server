@@ -387,4 +387,29 @@ RSpec.describe Entries::Changes do
     expect(queries_large).to eq(queries_small)
     expect(queries_large).to eq(4)
   end
+
+  it "nothing changed since the cursor: entries [], has_more false, cursor equals the given since (same decoded time and id, exact microseconds including .000001), subscriptions snapshot still complete" do
+    t_sub = Time.utc(2026, 10, 1, 10, 0, 0)
+    t_entry = Time.utc(2026, 10, 1, 12, 0, 0, 1)
+
+    feed_a = create(:feed, title: "Feed A")
+    feed_b = create(:feed, title: "Feed B")
+    sub_a = create(:subscription, user: user, feed: feed_a, created_at: t_sub, updated_at: t_sub)
+    sub_b = create(:subscription, user: user, feed: feed_b, created_at: t_sub, updated_at: t_sub)
+    entry = create(:entry, feed: feed_a, published_at: t_entry, created_at: t_entry, updated_at: t_entry)
+
+    given_cursor = Entries::SyncCursor.encode(changed_at: t_entry, id: entry.id)
+    decoded_since = Entries::SyncCursor.decode(given_cursor)
+
+    result = travel_to(Time.utc(2026, 10, 2, 10, 0, 0), with_usec: true) do
+      described_class.call(user: user, since: decoded_since)
+    end
+
+    expect(result[:entries]).to eq([])
+    expect(result[:has_more]).to be(false)
+    expect(result[:cursor]).to eq(given_cursor)
+    expect(Entries::SyncCursor.decode(result[:cursor])).to eq([ t_entry, entry.id ])
+    expect(Entries::SyncCursor.decode(result[:cursor]).first.usec).to eq(1)
+    expect(result[:subscriptions].map { |s| s[:id] }).to eq([ sub_a.id.to_s, sub_b.id.to_s ])
+  end
 end
