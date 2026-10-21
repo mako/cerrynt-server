@@ -66,4 +66,35 @@ RSpec.describe Entries::UpdateState do
     expect(state.starred_at).to eq(t1)
     expect(state.updated_at).to eq(t2)
   end
+
+  it "reads Time.current only after the write transaction is materialized" do
+    user_id = user.id
+    entry_id = entry.id
+    events = []
+    t_before_lock = Time.utc(2026, 10, 10, 10, 0, 0)
+    t_after_lock = Time.utc(2026, 10, 10, 10, 0, 5)
+
+    sub = ActiveSupport::Notifications.subscribe("sql.active_record") do |_name, _start, _finish, _id, payload|
+      sql = payload[:sql].to_s.strip
+      events << :begin if sql.match?(/\A(BEGIN|SAVEPOINT)\b/i)
+    end
+
+    allow(Time).to receive(:current) do
+      events << :time_current
+      events.include?(:begin) ? t_after_lock : t_before_lock
+    end
+
+    begin
+      state = described_class.call(user: user_id, entry_id: entry_id, read: true, starred: true)
+      expect(state.read_at).to eq(t_after_lock)
+      expect(state.starred_at).to eq(t_after_lock)
+      expect(state.created_at).to eq(t_after_lock)
+      expect(state.updated_at).to eq(t_after_lock)
+    ensure
+      ActiveSupport::Notifications.unsubscribe(sub)
+    end
+
+    expect(events.index(:begin)).not_to be_nil
+    expect(events.index(:time_current)).to be > events.index(:begin)
+  end
 end

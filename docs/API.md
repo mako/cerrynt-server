@@ -110,14 +110,17 @@ At least one of `subscription_id` / `before` is required. `before` is an ISO 860
 ## Sync
 
 ### `GET /sync?since=<cursor>`
-First sync: omit `since`. Returns everything changed after the cursor:
+First sync: omit `since`. A present `since` must be a cursor returned by a previous sync response; an empty value is invalid. Every response contains the complete current `subscriptions` list and one page (up to 100) of `entries`, oldest change first:
 ```json
 { "subscriptions": [Subscription],
   "entries": [EntrySummary],
   "cursor": "opaque-string",
   "has_more": false }
 ```
-Clients store `cursor` and pass it next time; repeat while `has_more` is true. Conflict rule: **last write wins** per entry state.
+An entry is sent when it is new or changed, when its read/starred state changed, or when you subscribed (or re-subscribed) to its feed; entries of feeds you do not follow are never sent. The same entry can be sent more than once (for example when it changes while you page): clients must upsert by `id`.
+Clients store `cursor` and pass it as `since` on the next request; repeat while `has_more` is true. When `entries` is empty the returned `cursor` stays valid and no change is ever skipped.
+`subscriptions` is authoritative: a subscription the client knows that is absent from it, together with its local entries, has been removed. Entries deleted by server-side retention are not reported. `unread_count` values describe the moment of the response. Conflict rule: last write wins per entry state.
+Errors: `bad_request` (`details.param` is `since` when `since` is malformed, tampered with, or empty).
 
 ## OPML
 

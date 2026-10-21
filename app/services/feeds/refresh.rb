@@ -81,12 +81,11 @@ module Feeds
       end
 
       def persist(feed, prepared)
-        now = Time.current
         created_count = 0
         updated_count = 0
         valid_entries = prepared.entries
 
-        ApplicationRecord.transaction do
+        ApplicationRecord.write_transaction do |now|
           guids = valid_entries.map(&:guid)
           existing_entries = guids.any? ? feed.entries.where(guid: guids).index_by(&:guid) : {}
 
@@ -98,6 +97,7 @@ module Feeds
             if existing
               changes = compute_changes(existing, item, now)
               if changes.any?
+                changes[:updated_at] = now
                 existing.update!(changes)
                 updated_count += 1
               end
@@ -266,7 +266,8 @@ module Feeds
           last_fetched_at: now,
           last_success_at: now,
           consecutive_failures: 0,
-          status: "active"
+          status: "active",
+          updated_at: now
         }
 
         feed_attributes[:title] = metadata.title if metadata.title.present?

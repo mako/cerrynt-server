@@ -130,4 +130,43 @@ RSpec.describe Entries::MarkRead do
     expect(marked).to eq(0)
     expect(EntryState.where(user_id: user.id, entry_id: entry.id).count).to eq(1)
   end
+
+  it "reads Time.current only after the write transaction is materialized" do
+    t_pub = Time.utc(2026, 10, 1, 12, 0, 0)
+    t_before_lock = Time.utc(2026, 10, 10, 10, 0, 0)
+    t_after_lock = Time.utc(2026, 10, 10, 10, 0, 5)
+
+    e_new = create(:entry, feed: feed_a, published_at: t_pub)
+    e_existing = create(:entry, feed: feed_a, published_at: t_pub)
+    s_existing = create(:entry_state, user: user, entry: e_existing, read_at: nil, starred_at: t_pub, created_at: t_pub, updated_at: t_pub)
+
+    events = []
+    sub = ActiveSupport::Notifications.subscribe("sql.active_record") do |_name, _start, _finish, _id, payload|
+      sql = payload[:sql].to_s.strip
+      events << :begin if sql.match?(/\A(BEGIN|SAVEPOINT)\b/i)
+    end
+
+    allow(Time).to receive(:current) do
+      events << :time_current
+      events.include?(:begin) ? t_after_lock : t_before_lock
+    end
+
+    begin
+      marked = described_class.call(user: user, before: t_pub)
+      expect(marked).to eq(2)
+    ensure
+      ActiveSupport::Notifications.unsubscribe(sub)
+    end
+
+    expect(events.index(:begin)).not_to be_nil
+    expect(events.index(:time_current)).to be > events.index(:begin)
+
+    s_created = EntryState.find_by!(user_id: user.id, entry_id: e_new.id)
+    expect(s_created.read_at).to eq(t_after_lock)
+    expect(s_created.updated_at).to eq(t_after_lock)
+
+    s_existing.reload
+    expect(s_existing.read_at).to eq(t_after_lock)
+    expect(s_existing.updated_at).to eq(t_after_lock)
+  end
 end
