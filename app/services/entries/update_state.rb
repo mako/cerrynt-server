@@ -17,8 +17,7 @@ module Entries
       attempts = 0
       begin
         attempts += 1
-        EntryState.transaction(requires_new: true) do
-          now = Time.current
+        EntryState.write_transaction do |now|
           state = find_existing_state
 
           if state.nil?

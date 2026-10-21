@@ -13,8 +13,7 @@ module Entries
     end
 
     def call
-      EntryState.transaction(requires_new: true) do
-        now = Time.current
+      EntryState.write_transaction do |now|
         candidates = build_candidates_scope
         update_existing_states(candidates, now) + insert_missing_states(candidates, now)
       end

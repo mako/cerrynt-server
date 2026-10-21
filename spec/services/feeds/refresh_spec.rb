@@ -780,6 +780,51 @@ RSpec.describe Feeds::Refresh do
         expect(entries_by_guid["s-3"].content).to eq("<p>body 3</p>")
         expect(Rails.logger).to have_received(:warn).with("[Feeds::ContentSanitizer] StandardError").twice
       end
+
+      it "reads Time.current in persist only after the write transaction is materialized" do
+        t_pub = Time.utc(2026, 10, 1, 12, 0, 0)
+        t_before_lock = Time.utc(2026, 10, 10, 10, 0, 0)
+        t_after_lock = Time.utc(2026, 10, 10, 10, 0, 5)
+
+        existing_entry = create(:entry, feed: feed, guid: "existing-g", title: "Old Title", published_at: t_pub, created_at: t_pub, updated_at: t_pub)
+        e_updated = build_entry(guid: "existing-g", title: "New Title", published_at: t_pub)
+        e_new = build_entry(guid: "new-g", title: "Brand New", published_at: t_pub)
+
+        prepared = described_class.prepare(build_fetch_result(entries: [ e_updated, e_new ]))
+
+        events = []
+        sub = ActiveSupport::Notifications.subscribe("sql.active_record") do |_name, _start, _finish, _id, payload|
+          sql = payload[:sql].to_s.strip
+          events << :begin if sql.match?(/\A(BEGIN|SAVEPOINT)\b/i)
+        end
+
+        allow(Time).to receive(:current) do
+          events << :time_current
+          events.include?(:begin) ? t_after_lock : t_before_lock
+        end
+
+        begin
+          result = described_class.persist(feed, prepared)
+          expect(result).to be_ok
+        ensure
+          ActiveSupport::Notifications.unsubscribe(sub)
+        end
+
+        expect(events.index(:begin)).not_to be_nil
+        expect(events.index(:time_current)).to be > events.index(:begin)
+
+        created_entry = feed.entries.find_by!(guid: "new-g")
+        expect(created_entry.created_at).to eq(t_after_lock)
+        expect(created_entry.updated_at).to eq(t_after_lock)
+
+        existing_entry.reload
+        expect(existing_entry.updated_at).to eq(t_after_lock)
+
+        feed.reload
+        expect(feed.last_fetched_at).to eq(t_after_lock)
+        expect(feed.last_success_at).to eq(t_after_lock)
+        expect(feed.updated_at).to eq(t_after_lock)
+      end
     end
   end
 end
