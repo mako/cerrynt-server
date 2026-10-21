@@ -31,6 +31,7 @@ Every behaviour change must be accompanied by specs (request specs for endpoints
 - **Authentication:** API tokens are opaque strings per device; only store the SHA-256 hex digest (`token_digest`).
 - **Security:** Never log or commit secrets (use Rails credentials or environment variables).
 - **Error Responses:** Match the standard JSON error shapes defined in `docs/API.md`.
+- **Sync timestamps:** `entries.updated_at`, `entry_states.updated_at` and `subscriptions.created_at` drive `GET /sync`. Write them only after the write transaction is materialized: use `ApplicationRecord.write_transaction` and its yielded time (never a `Time.current` taken before it).
 
 ## Verified Commands
 - **Setup:** `bin/setup --skip-server` (or `bin/setup`)
