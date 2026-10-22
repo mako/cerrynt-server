@@ -68,7 +68,7 @@ Design notes:
 - [ ] **R3.4** Conditional GET (`ETag`, `Last-Modified`), `next_fetch_at` scheduling, exponential backoff on failures, feed `status` (`active`/`failing`/`dead`). A feed whose last refresh had deferred entries must be fetched unconditionally (etag and last_modified are not stored in that case).
 - [ ] **R3.5** Solid Queue recurring job that fetches due feeds in small batches. Avoid re-sanitizing unchanged entries on every refresh (digest of the raw content plus a sanitizer version); measured cost is about 40 ms per 25 KB entry.
 - [x] **R3.6a** Sanitize entry HTML at ingest (allow-list, safe URLs, rel on links).
-- [ ] **R3.6b** Retention policy for old entries.
+- [ ] **R3.6b** Retention policy for old entries. Must cap the number of stored entries per feed: `GET /entries`, `GET /sync` and the per-subscription `unread_count` all scan the stored entries of the followed feeds; required before deployment.
 
 **Done when:** tests cover malicious URLs, redirects to private IPs, oversized responses, malformed feeds, duplicate guids.
 
@@ -79,7 +79,7 @@ Design notes:
 - [x] **R4.3** `PATCH /api/v1/entries/:id/state` (read/starred), idempotent; `POST /api/v1/entries/mark_read`.
 - [x] **R4.4** `GET /api/v1/sync?since=` returns subscriptions, new/changed entries and changed states since the cursor.
 - [ ] **R4.5** OPML import and export. Parse OPML with safe Nokogiri options (no entity substitution, no network, reject DTD declarations); same XXE rule as the feed fetcher.
-- [ ] **R4.6** Unread counts per subscription (cheap query, no N+1).
+- [x] **R4.6** Unread counts per subscription (cheap query, no N+1).
 
 ## Phase R5 – Plans and limits
 

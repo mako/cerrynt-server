@@ -781,4 +781,254 @@ RSpec.describe "Api::V1::Subscriptions", type: :request do
       expect(state.reload.read_at).to be_present
     end
   end
+
+  describe "Unread count semantics, cross-endpoint consistency, and isolation (R4.6)" do
+    describe "Type and fallback (0 unread)" do
+      it "returns an Integer unread_count equal to 0 for empty and all-read feeds in GET /subscriptions without secondary queries" do
+        feed_empty = create(:feed)
+        sub_empty = create(:subscription, user: pro_user, feed: feed_empty)
+
+        feed_all_read = create(:feed)
+        sub_all_read = create(:subscription, user: pro_user, feed: feed_all_read)
+        e1 = create(:entry, feed: feed_all_read)
+        e2 = create(:entry, feed: feed_all_read)
+        create(:entry_state, user: pro_user, entry: e1, read_at: 1.day.ago)
+        create(:entry_state, user: pro_user, entry: e2, read_at: 2.days.ago)
+
+        expect(Entry).to receive(:unread_counts_for).once.and_call_original
+        get "/api/v1/subscriptions", headers: pro_headers
+        expect(response).to have_http_status(:ok)
+
+        subs = response.parsed_body["subscriptions"]
+        empty_sub_json = subs.find { |s| s["id"] == sub_empty.id.to_s }
+        all_read_sub_json = subs.find { |s| s["id"] == sub_all_read.id.to_s }
+
+        expect(empty_sub_json["unread_count"]).to be_an(Integer)
+        expect(empty_sub_json["unread_count"]).to eq(0)
+        expect(all_read_sub_json["unread_count"]).to be_an(Integer)
+        expect(all_read_sub_json["unread_count"]).to eq(0)
+      end
+
+      it "returns an Integer unread_count equal to 0 for empty and all-read feeds in the subscriptions snapshot of GET /sync without secondary queries" do
+        feed_empty = create(:feed)
+        sub_empty = create(:subscription, user: pro_user, feed: feed_empty)
+
+        feed_all_read = create(:feed)
+        sub_all_read = create(:subscription, user: pro_user, feed: feed_all_read)
+        e1 = create(:entry, feed: feed_all_read)
+        e2 = create(:entry, feed: feed_all_read)
+        create(:entry_state, user: pro_user, entry: e1, read_at: 1.day.ago)
+        create(:entry_state, user: pro_user, entry: e2, read_at: 2.days.ago)
+
+        expect(Entry).to receive(:unread_counts_for).once.and_call_original
+        get "/api/v1/sync", headers: pro_headers
+        expect(response).to have_http_status(:ok)
+
+        sync_subs = response.parsed_body["subscriptions"]
+        sync_empty_json = sync_subs.find { |s| s["id"] == sub_empty.id.to_s }
+        sync_all_read_json = sync_subs.find { |s| s["id"] == sub_all_read.id.to_s }
+
+        expect(sync_empty_json["unread_count"]).to be_an(Integer)
+        expect(sync_empty_json["unread_count"]).to eq(0)
+        expect(sync_all_read_json["unread_count"]).to be_an(Integer)
+        expect(sync_all_read_json["unread_count"]).to eq(0)
+      end
+    end
+
+    it "maintains exact consistency between each subscription unread_count and all pages of GET /entries?unread=true and GET /sync across mixed data" do
+      other_user = create(:user, plan: "pro")
+
+      # Feed A: mixed dataset
+      sub_a = create(:subscription, user: pro_user, created_at: 5.days.ago)
+      feed_a = sub_a.feed
+      create(:subscription, user: other_user, feed: feed_a)
+
+      # 1. published BEFORE subscription was created (no state -> unread)
+      create(:entry, feed: feed_a, published_at: 10.days.ago)
+      # 2. published AFTER subscription (no state -> unread)
+      create(:entry, feed: feed_a, published_at: 4.days.ago)
+      # 3. read entry (state with read_at -> read)
+      a3 = create(:entry, feed: feed_a, published_at: 3.days.ago)
+      create(:entry_state, user: pro_user, entry: a3, read_at: 2.days.ago)
+      # 4. starred-only entry (read_at nil, starred_at set -> unread)
+      a4 = create(:entry, feed: feed_a, published_at: 2.days.ago)
+      create(:entry_state, user: pro_user, entry: a4, read_at: nil, starred_at: 1.day.ago)
+      # 5. cleared tombstone row (both timestamps nil -> unread)
+      a5 = create(:entry, feed: feed_a, published_at: 1.day.ago)
+      create(:entry_state, user: pro_user, entry: a5, read_at: nil, starred_at: nil)
+      # 6. another user's read state on the same feed (pro_user has no state -> unread)
+      a6 = create(:entry, feed: feed_a, published_at: 12.hours.ago)
+      create(:entry_state, user: other_user, entry: a6, read_at: 6.hours.ago)
+
+      # Feed B: more unread entries than a small page (limit 7)
+      sub_b = create(:subscription, user: pro_user, created_at: 5.days.ago)
+      feed_b = sub_b.feed
+      15.times do |i|
+        create(:entry, feed: feed_b, published_at: (20 + i).hours.ago)
+      end
+      2.times do |i|
+        e = create(:entry, feed: feed_b, published_at: (50 + i).hours.ago)
+        create(:entry_state, user: pro_user, entry: e, read_at: 1.day.ago)
+      end
+
+      # Feed C: all read entries
+      sub_c = create(:subscription, user: pro_user, created_at: 5.days.ago)
+      feed_c = sub_c.feed
+      2.times do |i|
+        e = create(:entry, feed: feed_c, published_at: (30 + i).hours.ago)
+        create(:entry_state, user: pro_user, entry: e, read_at: 1.day.ago)
+      end
+
+      get "/api/v1/subscriptions", headers: pro_headers
+      expect(response).to have_http_status(:ok)
+      subs_by_id = response.parsed_body["subscriptions"].index_by { |s| s["id"] }
+
+      get "/api/v1/sync", headers: pro_headers
+      expect(response).to have_http_status(:ok)
+      sync_subs_by_id = response.parsed_body["subscriptions"].index_by { |s| s["id"] }
+
+      [ sub_a, sub_b, sub_c ].each do |sub|
+        unread_count_sub = subs_by_id[sub.id.to_s]["unread_count"]
+        unread_count_sync = sync_subs_by_id[sub.id.to_s]["unread_count"]
+
+        collected_entries = []
+        cursor = nil
+        loop do
+          params = { subscription_id: sub.id, unread: "true", limit: 7 }
+          params[:cursor] = cursor if cursor
+          get "/api/v1/entries", params: params, headers: pro_headers
+          expect(response).to have_http_status(:ok)
+          body = response.parsed_body
+          collected_entries.concat(body["entries"])
+          cursor = body["next_cursor"]
+          break unless cursor
+        end
+
+        expect(unread_count_sub).to eq(collected_entries.size)
+        expect(unread_count_sync).to eq(unread_count_sub)
+      end
+
+      expect(subs_by_id[sub_a.id.to_s]["unread_count"]).to eq(5)
+      expect(subs_by_id[sub_b.id.to_s]["unread_count"]).to eq(15)
+      expect(subs_by_id[sub_c.id.to_s]["unread_count"]).to eq(0)
+    end
+
+    it "updates unread_count correctly across real write paths while preserving other subscriptions and users" do
+      other_user = create(:user, plan: "pro")
+      other_token = ApiToken.issue!(user: other_user, name: "laptop-other")[1]
+      other_headers = { "Authorization" => "Bearer #{other_token}" }
+
+      feed1 = create(:feed)
+      feed2 = create(:feed)
+
+      sub1 = create(:subscription, user: pro_user, feed: feed1)
+      sub2 = create(:subscription, user: pro_user, feed: feed2)
+      other_sub1 = create(:subscription, user: other_user, feed: feed1)
+
+      e1 = create(:entry, feed: feed1, published_at: 1.day.ago)
+      create(:entry, feed: feed1, published_at: 2.days.ago)
+      create(:entry, feed: feed1, published_at: 3.days.ago)
+
+      create(:entry, feed: feed2, published_at: 1.day.ago)
+      create(:entry, feed: feed2, published_at: 2.days.ago)
+
+      check_counts = lambda do |expected_sub1, expected_sub2, expected_other_sub1|
+        get "/api/v1/subscriptions", headers: pro_headers
+        expect(response).to have_http_status(:ok)
+        subs = response.parsed_body["subscriptions"]
+        expect(subs.find { |s| s["id"] == sub1.id.to_s }["unread_count"]).to eq(expected_sub1)
+        expect(subs.find { |s| s["id"] == sub2.id.to_s }["unread_count"]).to eq(expected_sub2)
+
+        get "/api/v1/subscriptions", headers: other_headers
+        expect(response).to have_http_status(:ok)
+        other_subs = response.parsed_body["subscriptions"]
+        expect(other_subs.find { |s| s["id"] == other_sub1.id.to_s }["unread_count"]).to eq(expected_other_sub1)
+      end
+
+      # Initial state: 3 on sub1, 2 on sub2, 3 on other_sub1
+      check_counts.call(3, 2, 3)
+
+      # 1. PATCH state read:true lowers count by 1
+      patch "/api/v1/entries/#{e1.id}/state", params: { read: true }, headers: pro_headers, as: :json
+      expect(response).to have_http_status(:ok)
+      check_counts.call(2, 2, 3)
+
+      # 2. PATCH state read:false raises it back by 1
+      patch "/api/v1/entries/#{e1.id}/state", params: { read: false }, headers: pro_headers, as: :json
+      expect(response).to have_http_status(:ok)
+      check_counts.call(3, 2, 3)
+
+      # 3. PATCH state starred:true alone does not change count
+      patch "/api/v1/entries/#{e1.id}/state", params: { starred: true }, headers: pro_headers, as: :json
+      expect(response).to have_http_status(:ok)
+      check_counts.call(3, 2, 3)
+
+      # 4. POST mark_read sets count to 0 and marked equals previous count (3)
+      post "/api/v1/entries/mark_read", params: { subscription_id: sub1.id.to_s }, headers: pro_headers, as: :json
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body["marked"]).to eq(3)
+      check_counts.call(0, 2, 3)
+    end
+
+    it "keeps unread_count strictly independent for two users following the same feed when each mutates state" do
+      feed = create(:feed)
+      e1 = create(:entry, feed: feed, published_at: 1.day.ago)
+      e2 = create(:entry, feed: feed, published_at: 2.days.ago)
+      e3 = create(:entry, feed: feed, published_at: 3.days.ago)
+
+      u1 = create(:user, plan: "pro")
+      t1 = ApiToken.issue!(user: u1, name: "dev-u1")[1]
+      h1 = { "Authorization" => "Bearer #{t1}" }
+      s1 = create(:subscription, user: u1, feed: feed)
+
+      u2 = create(:user, plan: "pro")
+      t2 = ApiToken.issue!(user: u2, name: "dev-u2")[1]
+      h2 = { "Authorization" => "Bearer #{t2}" }
+      s2 = create(:subscription, user: u2, feed: feed)
+
+      get_counts = lambda do
+        get "/api/v1/subscriptions", headers: h1
+        c1 = response.parsed_body["subscriptions"].find { |s| s["id"] == s1.id.to_s }["unread_count"]
+
+        get "/api/v1/subscriptions", headers: h2
+        c2 = response.parsed_body["subscriptions"].find { |s| s["id"] == s2.id.to_s }["unread_count"]
+
+        [ c1, c2 ]
+      end
+
+      expect(get_counts.call).to eq([ 3, 3 ])
+
+      # User 1 marks e1 read
+      patch "/api/v1/entries/#{e1.id}/state", params: { read: true }, headers: h1, as: :json
+      expect(response).to have_http_status(:ok)
+      expect(get_counts.call).to eq([ 2, 3 ])
+
+      # User 2 marks e2 and e3 read
+      patch "/api/v1/entries/#{e2.id}/state", params: { read: true }, headers: h2, as: :json
+      expect(response).to have_http_status(:ok)
+      patch "/api/v1/entries/#{e3.id}/state", params: { read: true }, headers: h2, as: :json
+      expect(response).to have_http_status(:ok)
+      expect(get_counts.call).to eq([ 2, 1 ])
+
+      # User 1 marks all read via mark_read
+      post "/api/v1/entries/mark_read", params: { subscription_id: s1.id.to_s }, headers: h1, as: :json
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body["marked"]).to eq(2)
+      expect(get_counts.call).to eq([ 0, 1 ])
+
+      # User 2 unreads e2
+      patch "/api/v1/entries/#{e2.id}/state", params: { read: false }, headers: h2, as: :json
+      expect(response).to have_http_status(:ok)
+      expect(get_counts.call).to eq([ 0, 2 ])
+
+      # Verify GET /sync snapshot matches for both users
+      get "/api/v1/sync", headers: h1
+      sync_c1 = response.parsed_body["subscriptions"].find { |s| s["id"] == s1.id.to_s }["unread_count"]
+      expect(sync_c1).to eq(0)
+
+      get "/api/v1/sync", headers: h2
+      sync_c2 = response.parsed_body["subscriptions"].find { |s| s["id"] == s2.id.to_s }["unread_count"]
+      expect(sync_c2).to eq(2)
+    end
+  end
 end
