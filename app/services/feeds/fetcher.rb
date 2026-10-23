@@ -324,19 +324,10 @@ module Feeds
       status_code = response.code.to_i
       return failure(:not_a_feed, status: status_code, final_url: final_url) if body.blank?
 
-      # Feedjira's SAX handler resolves external entities, so documents with DTD
-      # declarations are rejected before Feedjira sees them. This Nokogiri pre-check
-      # is the only XXE defense; removing it requires the XML security specs to stay green.
-      doc = begin
-        Nokogiri::XML(body) do |config|
-          config.default_xml.nonet
-        end
-      rescue StandardError
-        nil
-      end
+      safe_result = Xml::SafeParser.parse(body, doctype: :fetcher_compatible)
+      return failure(:not_a_feed, status: status_code, final_url: final_url) unless safe_result.ok?
 
-      return failure(:not_a_feed, status: status_code, final_url: final_url) if doc.nil? || doc.root.nil?
-      return failure(:not_a_feed, status: status_code, final_url: final_url) if doc.internal_subset&.children&.any?
+      doc = safe_result.doc
 
       parsed = begin
         Feedjira.parse(body)

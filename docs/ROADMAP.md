@@ -90,7 +90,7 @@ Design notes:
 
 ## Phase R6 – Production on EC2
 
-- [ ] **R6.1** Kamal 2 deploy to the EC2 instance; TLS via the built-in proxy; domain. Set RAILS_MAX_THREADS explicitly in config/deploy.yml so Puma and Feeds::FetchGate agree.
+- [ ] **R6.1** Kamal 2 deploy to the EC2 instance; TLS via the built-in proxy; domain. Set RAILS_MAX_THREADS explicitly in config/deploy.yml so Puma and Feeds::FetchGate agree. Set a request body limit at the proxy (Thruster MAX_REQUEST_BODY, about 2 MB): Rack spools multipart uploads before the controller runs, so the 1 MB OPML cap in the app is not enough on its own.
 - [ ] **R6.2** Production config: logging, error reporting, `force_ssl`, host authorization.
 - [ ] **R6.3** Back up the SQLite databases (Litestream or scheduled sqlite3 .backup to S3), keep storage/ as a persistent Kamal volume, test a restore once.
 - [ ] **R6.4** Uptime check and basic alerting.
