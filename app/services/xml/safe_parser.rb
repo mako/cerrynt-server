@@ -20,7 +20,7 @@ module Xml
     end
 
     def parse
-      return failure(:malformed) if @body.nil? || @body.bytesize.zero? || @body.to_s.scrub.strip.empty?
+      return failure(:malformed) if @body.nil? || @body.bytesize.zero?
 
       doc = begin
         Nokogiri::XML(@body) do |config|
