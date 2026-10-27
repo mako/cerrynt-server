@@ -25,8 +25,8 @@ module Feeds
     ParsedFeed = Data.define(:title, :site_url, :entries)
     ParsedEntry = Data.define(:guid, :url, :title, :author, :summary, :content, :published_at)
 
-    MAX_URL_LENGTH = 2048
-    ALLOWED_PORTS = [ 80, 443 ].freeze
+    MAX_URL_LENGTH = UrlPolicy::MAX_URL_LENGTH
+    ALLOWED_PORTS = UrlPolicy::ALLOWED_PORTS
     MAX_REDIRECTS = 3
     OPEN_TIMEOUT = 5
     READ_TIMEOUT = 5
@@ -243,18 +243,7 @@ module Feeds
     private
 
     def validate_url(url)
-      return nil if url.nil? || !url.is_a?(String)
-      return nil if url.length > MAX_URL_LENGTH
-
-      uri = URI.parse(url)
-      return nil unless uri.is_a?(URI::HTTP) || uri.is_a?(URI::HTTPS)
-      return nil if uri.host.nil? || uri.host.strip.empty?
-      return nil if uri.user || uri.password
-      return nil unless ALLOWED_PORTS.include?(uri.port)
-
-      uri
-    rescue URI::InvalidURIError
-      nil
+      UrlPolicy.validate_feed_url(url)
     end
 
     def resolve(host, remaining_time)
