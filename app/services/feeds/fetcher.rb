@@ -25,8 +25,8 @@ module Feeds
     ParsedFeed = Data.define(:title, :site_url, :entries)
     ParsedEntry = Data.define(:guid, :url, :title, :author, :summary, :content, :published_at)
 
-    MAX_URL_LENGTH = 2048
-    ALLOWED_PORTS = [ 80, 443 ].freeze
+    MAX_URL_LENGTH = UrlPolicy::MAX_URL_LENGTH
+    ALLOWED_PORTS = UrlPolicy::ALLOWED_PORTS
     MAX_REDIRECTS = 3
     OPEN_TIMEOUT = 5
     READ_TIMEOUT = 5
@@ -243,18 +243,7 @@ module Feeds
     private
 
     def validate_url(url)
-      return nil if url.nil? || !url.is_a?(String)
-      return nil if url.length > MAX_URL_LENGTH
-
-      uri = URI.parse(url)
-      return nil unless uri.is_a?(URI::HTTP) || uri.is_a?(URI::HTTPS)
-      return nil if uri.host.nil? || uri.host.strip.empty?
-      return nil if uri.user || uri.password
-      return nil unless ALLOWED_PORTS.include?(uri.port)
-
-      uri
-    rescue URI::InvalidURIError
-      nil
+      UrlPolicy.validate_feed_url(url)
     end
 
     def resolve(host, remaining_time)
@@ -324,19 +313,10 @@ module Feeds
       status_code = response.code.to_i
       return failure(:not_a_feed, status: status_code, final_url: final_url) if body.blank?
 
-      # Feedjira's SAX handler resolves external entities, so documents with DTD
-      # declarations are rejected before Feedjira sees them. This Nokogiri pre-check
-      # is the only XXE defense; removing it requires the XML security specs to stay green.
-      doc = begin
-        Nokogiri::XML(body) do |config|
-          config.default_xml.nonet
-        end
-      rescue StandardError
-        nil
-      end
+      safe_result = Xml::SafeParser.parse(body, doctype: :fetcher_compatible)
+      return failure(:not_a_feed, status: status_code, final_url: final_url) unless safe_result.ok?
 
-      return failure(:not_a_feed, status: status_code, final_url: final_url) if doc.nil? || doc.root.nil?
-      return failure(:not_a_feed, status: status_code, final_url: final_url) if doc.internal_subset&.children&.any?
+      doc = safe_result.doc
 
       parsed = begin
         Feedjira.parse(body)

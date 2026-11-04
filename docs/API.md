@@ -24,6 +24,7 @@ Base path: `/api/v1`. JSON in, JSON out. This document is the contract between `
 | 422 | `validation_failed` | `details` holds field errors |
 | 422 | `invalid_feed_url` | malformed, not http/https, too long, or the response is not a feed |
 | 422 | `feed_unreachable` | could not fetch the feed (this includes hosts that are not allowed) |
+| 422 | `invalid_opml` | the uploaded OPML document is unusable; `details.reason` is one of `malformed`, `doctype_not_allowed`, `not_opml`, `too_large`, `too_many_outlines` |
 | 429 | `rate_limited` | too many requests, or too many feed fetches in progress; retry after `Retry-After` seconds |
 
 ## Auth
@@ -124,8 +125,19 @@ Errors: `bad_request` (`details.param` is `since` when `since` is malformed, tam
 
 ## OPML
 
-- `POST /opml/import` (`multipart/form-data`, field `file`) → `{ "imported": 5, "skipped": 2, "errors": [] }` (plan limits apply).
-- `GET /opml/export` → `application/xml`.
+### `POST /opml/import`
+`multipart/form-data` with one file in the field `file` (at most 1 MB, at most 500 feed outlines). The request fetches nothing: feeds that are new to the server are created without entries and are fetched later by the background refresh, so their `unread_count` is 0 until then. Outlines are processed in document order. An outline with a non-blank `xmlUrl` attribute is a feed; other outlines (folders) are traversed and otherwise ignored. The feed name comes from the `title` attribute, else `text`; it is only a provisional title for feeds that are new to the server, existing feeds are never changed.
+```json
+{ "imported": 5, "skipped": 2, "errors": [ { "url": "https://example.com/feed.xml", "code": "feed_limit_reached" } ] }
+```
+- `imported`: new subscriptions created.
+- `skipped`: outlines whose feed you already follow, or that repeat an earlier outline of the same file (after URL normalization). Checked before the plan limit.
+- `errors`: outlines that were not imported, each with the submitted `url` (cut to 2048 characters) and a `code`: `invalid_feed_url` (not an acceptable feed URL) or `feed_limit_reached` (the plan limit was reached; new subscriptions are created in document order until it is).
+`200` even when nothing was imported. Errors: `bad_request` (`details.param` is `file` when the field is missing or not an uploaded file), `invalid_opml`, `rate_limited`.
+
+### `GET /opml/export`
+All your subscriptions as an OPML 2.0 document, ordered by subscription creation time, then id: one flat `<outline type="rss" text="..." title="..." xmlUrl="..." htmlUrl="..."/>` per subscription (`htmlUrl` only when the feed has a site URL). The name is your `custom_title`, else the feed title, else the feed URL.
+`200` → `application/xml; charset=utf-8` with `Content-Disposition: attachment; filename="cerrynt-subscriptions.opml"`.
 
 ## Open questions
 

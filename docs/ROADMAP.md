@@ -78,7 +78,7 @@ Design notes:
 - [x] **R4.2** `GET /api/v1/entries/:id` (full content). Requires R3.6a (content sanitized at ingest) before content is exposed.
 - [x] **R4.3** `PATCH /api/v1/entries/:id/state` (read/starred), idempotent; `POST /api/v1/entries/mark_read`.
 - [x] **R4.4** `GET /api/v1/sync?since=` returns subscriptions, new/changed entries and changed states since the cursor.
-- [ ] **R4.5** OPML import and export. Parse OPML with safe Nokogiri options (no entity substitution, no network, reject DTD declarations); same XXE rule as the feed fetcher.
+- [x] **R4.5** OPML import and export. Parse OPML with safe Nokogiri options (no entity substitution, no network, reject DTD declarations); same XXE rule as the feed fetcher.
 - [x] **R4.6** Unread counts per subscription (cheap query, no N+1).
 
 ## Phase R5 – Plans and limits
@@ -90,8 +90,8 @@ Design notes:
 
 ## Phase R6 – Production on EC2
 
-- [ ] **R6.1** Kamal 2 deploy to the EC2 instance; TLS via the built-in proxy; domain. Set RAILS_MAX_THREADS explicitly in config/deploy.yml so Puma and Feeds::FetchGate agree.
-- [ ] **R6.2** Production config: logging, error reporting, `force_ssl`, host authorization.
+- [ ] **R6.1** Kamal 2 deploy to the EC2 instance; TLS via the built-in proxy; domain. Set RAILS_MAX_THREADS explicitly in config/deploy.yml so Puma and Feeds::FetchGate agree. Set a request body limit at the proxy (Thruster MAX_REQUEST_BODY, about 2 MB): Rack spools multipart uploads before the controller runs, so the 1 MB OPML cap in the app is not enough on its own.
+- [ ] **R6.2** Production config: logging, error reporting, `force_ssl`, host authorization. Rack-level request parse errors (for example a malformed multipart body) must also use the standard JSON error shape (exceptions_app); check in production mode.
 - [ ] **R6.3** Back up the SQLite databases (Litestream or scheduled sqlite3 .backup to S3), keep storage/ as a persistent Kamal volume, test a restore once.
 - [ ] **R6.4** Uptime check and basic alerting.
 - [ ] **R6.5** Abuse protection for a public instance: signup cap or invite code, Rack::Attack, per-user entry/feed limits, per-user cap on active API tokens. Subscribing fetches synchronously and holds a Puma thread for up to the fetch deadline: consider a shorter interactive deadline or moving the first fetch to a job; clean up feeds without subscriptions and orphaned entry_states. Per-user limit of one in-flight interactive fetch, so one account cannot hold all fetch slots. Entry retention (R3.6b) must land before deployment: the entries list scans every stored entry of the subscribed feeds per page.

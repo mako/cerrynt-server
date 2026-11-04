@@ -11,6 +11,8 @@ Rails.application.routes.draw do
         post :mark_read, on: :collection
       end
       get "sync", to: "sync#show"
+      post "opml/import", to: "opml#import"
+      get "opml/export", to: "opml#export"
 
       # The catch-all route must remain the LAST route in the api/v1 namespace
       match "*unmatched", to: "errors#not_found", via: :all
