@@ -230,24 +230,28 @@ RSpec.describe "Api::V1::Opml", type: :request do
           { file: { "nested" => "hash" } }
         ]
 
-        cases.each do |bad_params|
-          post "/api/v1/opml/import", params: bad_params, headers: headers
+        expect {
+          cases.each do |bad_params|
+            post "/api/v1/opml/import", params: bad_params, headers: headers
 
+            expect(response).to have_http_status(:bad_request)
+            expect(response.parsed_body).to eq({
+              "error" => {
+                "code" => "bad_request",
+                "message" => "Missing or invalid file parameter",
+                "details" => { "param" => "file" }
+              }
+            })
+          end
+
+          # JSON body instead of multipart
+          post "/api/v1/opml/import", params: { file: "not a file" }, headers: headers, as: :json
           expect(response).to have_http_status(:bad_request)
-          expect(response.parsed_body).to eq({
-            "error" => {
-              "code" => "bad_request",
-              "message" => "Missing or invalid file parameter",
-              "details" => { "param" => "file" }
-            }
-          })
-        end
-
-        # JSON body instead of multipart
-        post "/api/v1/opml/import", params: { file: "not a file" }, headers: headers, as: :json
-        expect(response).to have_http_status(:bad_request)
-        expect(response.parsed_body.dig("error", "code")).to eq("bad_request")
-        expect(response.parsed_body.dig("error", "details", "param")).to eq("file")
+          expect(response.parsed_body.dig("error", "code")).to eq("bad_request")
+          expect(response.parsed_body.dig("error", "details", "param")).to eq("file")
+        }.to not_change(Feed, :count)
+         .and not_change(Subscription, :count)
+         .and not_change(user.subscriptions, :count)
       end
     end
 
@@ -293,6 +297,7 @@ RSpec.describe "Api::V1::Opml", type: :request do
           end
         }.to not_change(Feed, :count)
          .and not_change(Subscription, :count)
+         .and not_change(user.subscriptions, :count)
       end
 
       it "accepts an OPML document of exactly 1 MB (1_048_576 bytes)" do
@@ -359,6 +364,64 @@ RSpec.describe "Api::V1::Opml", type: :request do
 
         post "/api/v1/opml/import", params: { file: upload6 }, headers: headers
         expect(response).to have_http_status(:ok)
+      end
+
+      it "resets the rate limit window with travel_to after 10 minutes, allowing 5 imports again before blocking" do
+        start_time = Time.current
+
+        travel_to(start_time) do
+          upload_invalid = build_upload("malformed xml")
+          upload_valid = build_upload("<opml version=\"2.0\"><body></body></opml>")
+
+          # 5 imports pass (one of them an invalid file)
+          post "/api/v1/opml/import", params: { file: upload_invalid }, headers: headers
+          expect(response).to have_http_status(:unprocessable_content)
+
+          4.times do
+            post "/api/v1/opml/import", params: { file: upload_valid }, headers: headers
+            expect(response).to have_http_status(:ok)
+          end
+
+          # the 6th => 429 rate_limited with Retry-After
+          post "/api/v1/opml/import", params: { file: upload_valid }, headers: headers
+          expect(response).to have_http_status(:too_many_requests)
+          expect(response.headers["Retry-After"]).to eq("600")
+          expect(response.parsed_body.dig("error", "code")).to eq("rate_limited")
+        end
+
+        # travel_to 9 minutes 59 seconds after the first request => still 429
+        travel_to(start_time + 9.minutes + 59.seconds) do
+          upload_valid = build_upload("<opml version=\"2.0\"><body></body></opml>")
+          post "/api/v1/opml/import", params: { file: upload_valid }, headers: headers
+
+          expect(response).to have_http_status(:too_many_requests)
+          expect(response.headers["Retry-After"]).to eq("600")
+          expect(response.parsed_body.dig("error", "code")).to eq("rate_limited")
+        end
+
+        # travel_to 10 minutes + 1 second after the first request => the next import is NOT 429
+        # (it passes or answers 422, whichever the body gives), and a second window then allows 5 again and blocks the 6th
+        travel_to(start_time + 10.minutes + 1.second) do
+          upload_valid = build_upload("<opml version=\"2.0\"><body></body></opml>")
+
+          # next import is NOT 429
+          post "/api/v1/opml/import", params: { file: upload_valid }, headers: headers
+          expect(response).not_to have_http_status(:too_many_requests)
+          expect(response).to have_http_status(:ok)
+
+          # second window allows 5 again (1 already done + 4 more = 5)
+          4.times do
+            post "/api/v1/opml/import", params: { file: upload_valid }, headers: headers
+            expect(response).not_to have_http_status(:too_many_requests)
+            expect(response).to have_http_status(:ok)
+          end
+
+          # and blocks the 6th
+          post "/api/v1/opml/import", params: { file: upload_valid }, headers: headers
+          expect(response).to have_http_status(:too_many_requests)
+          expect(response.headers["Retry-After"]).to eq("600")
+          expect(response.parsed_body.dig("error", "code")).to eq("rate_limited")
+        end
       end
     end
 
