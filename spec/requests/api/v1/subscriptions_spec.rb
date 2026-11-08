@@ -798,7 +798,8 @@ RSpec.describe "Api::V1::Subscriptions", type: :request do
       # (it matches the catch-all route api/v1/errors#not_found instead).
       malformed_ids = [
         "#{a}abc", "00#{a}", "#{a}.0", "#{a}e0", " #{a}", "#{a} ",
-        "+#{a}", "-#{a}", "0", "99999999999999999999", "٣"
+        "+#{a}", "-#{a}", "0", "99999999999999999999", "٣",
+        "#{a}\n", "#{a}\n1"
       ]
 
       malformed_ids.each do |malformed_id|
@@ -861,6 +862,8 @@ RSpec.describe "Api::V1::Subscriptions", type: :request do
       expect(controller.send(:parse_positive_id, "99999999999999999999")).to be_nil
       expect(controller.send(:parse_positive_id, ((1 << 63) - 1).to_s)).to eq((1 << 63) - 1)
       expect(controller.send(:parse_positive_id, (1 << 63).to_s)).to be_nil
+      expect(controller.send(:parse_positive_id, "12\n")).to be_nil
+      expect(controller.send(:parse_positive_id, "12\n34")).to be_nil
     end
   end
 
