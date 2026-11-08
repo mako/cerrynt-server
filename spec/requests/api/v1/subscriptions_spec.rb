@@ -780,6 +780,88 @@ RSpec.describe "Api::V1::Subscriptions", type: :request do
       expect(sub_json["unread_count"]).to eq(1) # entry1 is still read, entry2 is unread
       expect(state.reload.read_at).to be_present
     end
+
+    it "rejects malformed subscription ids with 404 identical to unknown id and preserves all subscriptions" do
+      feed1 = create(:feed)
+      feed2 = create(:feed)
+      sub1 = create(:subscription, user: user, feed: feed1)
+      sub2 = create(:subscription, user: user, feed: feed2)
+      sub_a, sub_b = [ sub1, sub2 ].sort_by(&:id)
+      a = sub_a.id
+      b = sub_b.id
+
+      delete "/api/v1/subscriptions/999999999", headers: headers
+      expect(response).to have_http_status(:not_found)
+      unknown_body = response.body
+
+      # The empty string "" is skipped as it is not routable to subscriptions#destroy
+      # (it matches the catch-all route api/v1/errors#not_found instead).
+      malformed_ids = [
+        "#{a}abc", "00#{a}", "#{a}.0", "#{a}e0", " #{a}", "#{a} ",
+        "+#{a}", "-#{a}", "0", "99999999999999999999", "٣"
+      ]
+
+      malformed_ids.each do |malformed_id|
+        encoded_id = ERB::Util.url_encode(malformed_id).gsub(".", "%2E")
+        delete "/api/v1/subscriptions/#{encoded_id}", headers: headers
+        expect(response).to have_http_status(:not_found), "Expected 404 for malformed id #{malformed_id.inspect}, got #{response.status}"
+        expect(response.body).to eq(unknown_body)
+        expect(Subscription.count).to eq(2)
+        expect(Subscription.where(id: [ a, b ]).count).to eq(2)
+      end
+    end
+
+    it "deletes exactly the specified subscription (204) on valid id and leaves the other" do
+      feed1 = create(:feed)
+      feed2 = create(:feed)
+      sub1 = create(:subscription, user: user, feed: feed1)
+      sub2 = create(:subscription, user: user, feed: feed2)
+      sub_a, sub_b = [ sub1, sub2 ].sort_by(&:id)
+
+      delete "/api/v1/subscriptions/#{sub_a.id}", headers: headers
+      expect(response).to have_http_status(:no_content)
+      expect(Subscription.find_by(id: sub_a.id)).to be_nil
+      expect(Subscription.find_by(id: sub_b.id)).to be_present
+      expect(user.subscriptions.count).to eq(1)
+    end
+
+    it "returns 404 with identical body and preserves the row when deleting another user's valid subscription id" do
+      feed1 = create(:feed)
+      feed2 = create(:feed)
+      sub1 = create(:subscription, user: user, feed: feed1)
+      sub2 = create(:subscription, user: user, feed: feed2)
+      _sub_a, _sub_b = [ sub1, sub2 ].sort_by(&:id)
+
+      other_user = create(:user)
+      other_sub = create(:subscription, user: other_user)
+
+      delete "/api/v1/subscriptions/999999999", headers: headers
+      expect(response).to have_http_status(:not_found)
+      unknown_body = response.body
+
+      delete "/api/v1/subscriptions/#{other_sub.id}", headers: headers
+      expect(response).to have_http_status(:not_found)
+      expect(response.body).to eq(unknown_body)
+      expect(Subscription.find_by(id: other_sub.id)).to be_present
+      expect(Subscription.count).to eq(3)
+    end
+
+    it "returns 401 when unauthenticated and leaves subscriptions intact" do
+      feed = create(:feed)
+      sub = create(:subscription, user: user, feed: feed)
+
+      delete "/api/v1/subscriptions/#{sub.id}"
+      expect(response).to have_http_status(:unauthorized)
+      expect(response.parsed_body.dig("error", "code")).to eq("unauthorized")
+      expect(Subscription.find_by(id: sub.id)).to be_present
+    end
+
+    it "enforces the upper bound in parse_positive_id helper against 64-bit overflow" do
+      controller = Api::V1::SubscriptionsController.new
+      expect(controller.send(:parse_positive_id, "99999999999999999999")).to be_nil
+      expect(controller.send(:parse_positive_id, ((1 << 63) - 1).to_s)).to eq((1 << 63) - 1)
+      expect(controller.send(:parse_positive_id, (1 << 63).to_s)).to be_nil
+    end
   end
 
   describe "Unread count semantics, cross-endpoint consistency, and isolation (R4.6)" do

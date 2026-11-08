@@ -3,10 +3,19 @@ module Api
     class BaseController < ActionController::API
       include Authenticatable
 
+      MAX_ID = (1 << 63) - 1
+
       rescue_from ActiveRecord::RecordNotFound, with: :render_not_found
       rescue_from ActionDispatch::Http::Parameters::ParseError, ActionController::ParameterMissing, with: :render_bad_request
 
       private
+
+      def parse_positive_id(raw)
+        return nil unless raw.is_a?(String) && raw.match?(/\A[1-9]\d*\z/)
+
+        value = raw.to_i
+        value <= MAX_ID ? value : nil
+      end
 
       def render_error(code:, message:, status:, details: {})
         render json: {
