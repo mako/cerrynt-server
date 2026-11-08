@@ -52,7 +52,12 @@ module Api
       end
 
       def destroy
-        subscription = current_user.subscriptions.find(params[:id])
+        id = parse_positive_id(params[:id])
+        return render_not_found unless id
+
+        subscription = current_user.subscriptions.find_by(id: id)
+        return render_not_found unless subscription
+
         subscription.destroy!
         head :no_content
       end

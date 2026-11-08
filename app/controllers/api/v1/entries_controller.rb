@@ -9,7 +9,6 @@ module Api
     class EntriesController < BaseController
       DEFAULT_LIMIT = 50
       MAX_LIMIT = 100
-      MAX_ID = (1 << 63) - 1
       ISO8601_REGEX = /\A\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})\z/
 
       InvalidParamError = Struct.new(:param)
@@ -168,13 +167,6 @@ module Api
           read: has_read ? body["read"] : nil,
           starred: has_starred ? body["starred"] : nil
         }
-      end
-
-      def parse_positive_id(raw)
-        return nil unless raw.is_a?(String) && raw.match?(/\A[1-9]\d*\z/)
-
-        value = raw.to_i
-        value <= MAX_ID ? value : nil
       end
 
       def parse_query_params
