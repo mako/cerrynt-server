@@ -664,6 +664,37 @@ RSpec.describe "Api::V1::Subscriptions", type: :request do
         expect(response).to have_http_status(:ok)
       end
     end
+
+    describe "log filtering (F2)" do
+      it "filters the url parameter and existing sensitive parameters from logs" do
+        stub_const("Feeds::Fetcher::DEFAULT_RESOLVER", ->(_host) { [ IPAddr.new("93.184.216.34") ] })
+        canary_url = "https://example.com/f2-canary-feed.xml"
+        canary_password = "super-secret-password-canary"
+        stub_request(:get, canary_url).to_return(
+          status: 200,
+          headers: { "Content-Type" => "application/rss+xml" },
+          body: %(<rss version="2.0"><channel><title>Canary</title><link>https://example.com</link></channel></rss>)
+        )
+
+        log_output = StringIO.new
+        original_logger = ActionController::Base.logger
+        ActionController::Base.logger = ActiveSupport::Logger.new(log_output).tap { |l| l.level = Logger::INFO }
+
+        begin
+          post "/api/v1/subscriptions",
+               params: { url: canary_url, password: canary_password },
+               headers: headers,
+               as: :json
+
+          log_text = log_output.string
+          expect(log_text).not_to include(canary_url)
+          expect(log_text).not_to include(canary_password)
+          expect(log_text).to include("[FILTERED]")
+        ensure
+          ActionController::Base.logger = original_logger
+        end
+      end
+    end
   end
 
   describe "GET /api/v1/subscriptions" do
