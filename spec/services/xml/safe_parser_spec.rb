@@ -315,5 +315,103 @@ RSpec.describe Xml::SafeParser do
 
       expect(conns).to eq(0)
     end
+
+    it "does not load external-subset DTD from filesystem and never leaks the canary into nodes or serialized output" do
+      dtd_file = Tempfile.new([ "canary", ".dtd" ])
+      dtd_file.write(%(<!ENTITY xxe "LEAKED-CANARY">\n))
+      dtd_file.flush
+
+      xml = %(<!DOCTYPE feed SYSTEM "file://#{dtd_file.path}"><feed><title>&xxe;</title></feed>)
+
+      result = nil
+      expect {
+        result = described_class.parse(xml, doctype: :fetcher_compatible)
+      }.not_to raise_error
+
+      expect(result.ok?).to be true
+      expect(result.doc.text).not_to include("LEAKED-CANARY")
+      expect(result.doc.xpath("//text()").map(&:text).join).not_to include("LEAKED-CANARY")
+      expect(result.doc.xpath("//*").map(&:text).join).not_to include("LEAKED-CANARY")
+      expect(result.doc.to_xml).not_to include("LEAKED-CANARY")
+    ensure
+      dtd_file&.close
+      dtd_file&.unlink
+    end
+
+    it "does not make network connections for external-subset DTD" do
+      # An acceptor running in a separate forked process is required: Nokogiri holds
+      # the Ruby GVL during C-level parsing, so an in-process Thread acceptor would never
+      # be scheduled, causing libxml2 to hang waiting for an HTTP response on regression.
+      # The forked child records the connection in the pipe before closing the socket so libxml2 observes EOF only after recording.
+      server = TCPServer.new("127.0.0.1", 0)
+      port = server.addr[1]
+      reader, writer = IO.pipe
+
+      child = Process.fork do
+        reader.close
+        begin
+          loop do
+            conn = server.accept
+            writer.write("x")
+            writer.flush
+            conn.close
+          end
+        rescue StandardError, IOError, SystemCallError, SignalException
+          exit!(0)
+        end
+      end
+
+      writer.close
+
+      connections = nil
+      begin
+        xml = %(<!DOCTYPE feed SYSTEM "http://127.0.0.1:#{port}/x.dtd"><feed><title>&xxe;</title></feed>)
+
+        result = described_class.parse(xml, doctype: :fetcher_compatible)
+        expect(result.ok?).to be true
+      ensure
+        server.close rescue nil
+        begin
+          Process.kill("KILL", child)
+        rescue Errno::ESRCH
+          nil
+        end
+        begin
+          Process.wait(child)
+        rescue Errno::ECHILD, Errno::ESRCH
+          nil
+        end
+        raw_connections = reader.read_nonblock(1024, exception: false)
+        connections = raw_connections.is_a?(String) ? raw_connections.bytesize : 0
+        reader.close rescue nil
+      end
+
+      expect(connections).to eq(0)
+    end
+
+    it "recovers from undefined entity references without raising an exception and records a parse error" do
+      # In :fetcher_compatible mode, Nokogiri uses default_xml.nonet (RECOVER enabled,
+      # DTDLOAD and NOENT disabled). Under RECOVER without DTDLOAD, external DTDs are not fetched,
+      # causing referenced external entities (e.g. &xxe;) to remain undefined.
+      # Rather than raising an exception or failing parsing, libxml2 recovers by recording
+      # an error/warning in doc.errors ("Entity 'xxe' not defined") and leaving an
+      # unexpanded EntityReference node in the document tree.
+      # This test documents this recovery behavior so any future Nokogiri or libxml2 behavior
+      # change (such as throwing an exception or silently expanding entities) surfaces immediately.
+      xml = %(<!DOCTYPE feed SYSTEM "http://dtd.invalid/feed.dtd"><feed><title>&xxe;</title></feed>)
+
+      result = nil
+      expect {
+        result = described_class.parse(xml, doctype: :fetcher_compatible)
+      }.not_to raise_error
+
+      expect(result.ok?).to be true
+      expect(result.doc.errors).to be_present
+      expect(result.doc.errors.map(&:message)).to include(a_string_matching(/Entity 'xxe' not defined/i))
+      title_node = result.doc.at_xpath("//title")
+      expect(title_node.children.first).to be_a(Nokogiri::XML::EntityReference)
+      expect(title_node.children.first.name).to eq("xxe")
+      expect(result.doc.to_xml).to include("<title>&xxe;</title>")
+    end
   end
 end
