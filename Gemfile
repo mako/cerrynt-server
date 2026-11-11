@@ -36,6 +36,9 @@ gem "thruster", require: false
 # RSS feed parser
 gem "feedjira"
 
+# Declared explicitly because the app parses untrusted XML; version floor is a security requirement
+gem "nokogiri", ">= 1.19.5"
+
 # JSON serializer
 
 # Pagination
