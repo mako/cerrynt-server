@@ -375,6 +375,7 @@ DEPENDENCIES
   factory_bot_rails
   feedjira
   kamal
+  nokogiri (>= 1.19.5)
   puma (>= 5.0)
   rails (~> 8.1.4)
   rspec-rails

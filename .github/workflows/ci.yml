@@ -5,6 +5,9 @@ on:
   push:
     branches: [ main ]
 
+permissions:
+  contents: read
+
 jobs:
   scan_ruby:
     runs-on: ubuntu-latest
@@ -64,6 +67,24 @@ jobs:
         uses: ruby/setup-ruby@v1
         with:
           bundler-cache: true
+
+      - name: Prepare database
+        run: bin/rails db:prepare
+
+      - name: Verify Zeitwerk autoloading
+        run: bin/rails zeitwerk:check
+
+      - name: Seed database (idempotency check)
+        run: |
+          bin/rails db:seed
+          count1=$(bin/rails runner 'print User.count')
+          bin/rails db:seed
+          count2=$(bin/rails runner 'print User.count')
+          echo "User count after first seed: $count1; after second seed: $count2"
+          if [ "$count1" -eq 0 ] || [ "$count1" -ne "$count2" ]; then
+            echo "Seed idempotency verification failed: count1=$count1 count2=$count2"
+            exit 1
+          fi
 
       - name: Run tests
         env:
