@@ -1,11 +1,14 @@
 if Rails.env.development?
-  email    = ENV.fetch("SEED_USER_EMAIL", "you@example.com")
-  password = ENV.fetch("SEED_USER_PASSWORD", SecureRandom.hex(12))
+  email = ENV.fetch("SEED_USER_EMAIL", "you@example.com")
 
-  user = User.find_or_create_by!(email: email) do |u|
-    u.password = password
+  if (existing_user = User.find_by(email: email))
+    puts "Seed user already exists (#{existing_user.email}); password unchanged."
+  elsif (password = ENV["SEED_USER_PASSWORD"]).blank?
+    warn "Seed user not created: set SEED_USER_PASSWORD=<at least 10 characters> bin/rails db:seed"
+  else
+    user = User.create!(email: email, password: password)
+
+    puts "Seed user ready:"
+    puts "  email:     #{user.email}"
   end
-
-  puts "Seed user ready:"
-  puts "  email:     #{user.email}"
 end
