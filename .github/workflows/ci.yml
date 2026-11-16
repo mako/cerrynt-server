@@ -76,12 +76,27 @@ jobs:
 
       - name: Seed database (idempotency check)
         run: |
+          count0=$(bin/rails runner 'print User.count')
+          if [ "$count0" -ne 0 ]; then
+            echo "Expected empty database before seed check, got User.count=$count0"
+            exit 1
+          fi
+
           bin/rails db:seed
+          count_unset=$(bin/rails runner 'print User.count')
+          echo "User count with SEED_USER_PASSWORD unset: $count_unset"
+          if [ "$count_unset" -ne 0 ]; then
+            echo "Expected User.count=0 when SEED_USER_PASSWORD is unset, got $count_unset"
+            exit 1
+          fi
+
+          seed_password=$(openssl rand -hex 12)
+          SEED_USER_PASSWORD="$seed_password" bin/rails db:seed
           count1=$(bin/rails runner 'print User.count')
-          bin/rails db:seed
+          SEED_USER_PASSWORD="$seed_password" bin/rails db:seed
           count2=$(bin/rails runner 'print User.count')
           echo "User count after first seed: $count1; after second seed: $count2"
-          if [ "$count1" -eq 0 ] || [ "$count1" -ne "$count2" ]; then
+          if [ "$count1" -ne 1 ] || [ "$count2" -ne 1 ]; then
             echo "Seed idempotency verification failed: count1=$count1 count2=$count2"
             exit 1
           fi

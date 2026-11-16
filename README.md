@@ -35,11 +35,21 @@ bin/setup --skip-server
 
 This installs dependencies, prepares the SQLite database, and clears temporary files.
 
-To seed a development user:
+To seed a development user (requires `SEED_USER_PASSWORD` of at least 10 characters; an existing user keeps its password, and the password is never printed):
 
 ```bash
-bin/rails db:seed
+SEED_USER_PASSWORD=<at-least-10-chars> bin/rails db:seed
 ```
+
+### Demo Account
+
+The `demo:account` rake task creates or updates a demo user account (starting empty with plan `free`, no feeds, subscriptions, or entries). Both `DEMO_USER_EMAIL` and `DEMO_USER_PASSWORD` (10–72 bytes) are required; no defaults are used and the password is never printed.
+
+```bash
+DEMO_USER_EMAIL=demo@example.com DEMO_USER_PASSWORD=<at-least-10-chars> bin/rails demo:account
+```
+
+Re-running the task for an existing email rotates the password, keeps the user's current plan unchanged, and revokes all active API tokens for that user.
 
 ### Starting the Server
 

@@ -36,7 +36,7 @@ Every behaviour change must be accompanied by specs (request specs for endpoints
 ## Verified Commands
 - **Setup:** `bin/setup --skip-server` (or `bin/setup`)
 - **Server:** `bin/rails server`
-- **Seed database:** `bin/rails db:seed`
+- **Seed database:** `SEED_USER_PASSWORD=<at-least-10-chars> bin/rails db:seed`
 - **Run test suite:** `bin/rails db:test:prepare && bundle exec rspec` (or `bundle exec rspec`)
 - **Lint code:** `bin/rubocop`
 - **Security scan:** `bin/brakeman --no-pager && bin/bundler-audit`
